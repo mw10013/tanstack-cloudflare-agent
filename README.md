@@ -1,5 +1,5 @@
 <h1 align="center">
-<code>TanStack Cloudflare SaaS</code>
+<code>TanStack Cloudflare Agent</code>
 </h1>
 
 <div align="center">
@@ -10,7 +10,7 @@
   TanStack • Cloudflare • Better Auth • Stripe • Shadcn on Base UI
   </p>
   <p>
-    <a href="https://tcs.devxo.workers.dev/">Demo</a>
+    <a href="https://tca.devxo.workers.dev/">Demo</a>
   </p>
 
 </div>
@@ -71,7 +71,7 @@
 ### Stripe
 
 - Install the [Stripe CLI](https://stripe.com/docs/stripe-cli).
-- Go to stripe and create a sandbox for testing named `tcs-int`
+- Go to stripe and create a sandbox for testing named `tca-int`
   - Remember secret key for `STRIPE_SECRET_KEY` environment variable.
 
 ### Local Env
@@ -83,7 +83,7 @@
 ```
 pnpm i
 pnpm d1:reset
-stripe login --project-name=tcs-int
+stripe login --project-name=tca-int
 pnpm stripe:listen
 # copy webhook signing secret to STRIPE_WEBHOOK_SECRET in .env
 pnpm dev
@@ -123,18 +123,18 @@ pnpm test:e2e
 - Cloudflare Web Analytics | Add a site
   - Remember token from script for ANALYTICS_TOKEN secret below.
 
-- pnpm exec wrangler kv namespace create tcs-kv-production
+- pnpm exec wrangler kv namespace create tca-kv-production
 - Update wrangler.jsonc production kv_namespaces
 - pnpm d1:reset:PRODUCTION
 - pnpm deploy:PRODUCTION
 - pnpm exec wrangler secret put SECRET --env production
   - BETTER_AUTH_SECRET, STRIPE_SECRET_KEY, STRIPE_WEBHOOK_SECRET, ANALYTICS_TOKEN
-- Workers & Pages Settings: tcs
+- Workers & Pages Settings: tca
   - Git repository: connect to git repo
   - Build configuration
     - Build command: CLOUDFLARE_ENV=production pnpm build
     - Deploy command: pnpm exec wrangler deploy --env production
-- Storage & databases: tcs-d1-production: Settings
+- Storage & databases: tca-d1-production: Settings
   - Enable read replication
 
 ## Shadcn with Base UI
@@ -149,5 +149,5 @@ Homepage / Pricing design by [dev-xo](https://github.com/dev-xo). See his [remix
 
 ## License
 
-Licensed under the [MIT License](https://github.com/mw10013/tanstack-cloudflare-saas/blob/main/LICENSE).
+Licensed under the [MIT License](https://github.com/mw10013/tanstack-cloudflare-agent/blob/main/LICENSE).
 

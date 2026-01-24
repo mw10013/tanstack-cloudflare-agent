@@ -4,7 +4,7 @@
  */
 {
   "$schema": "node_modules/wrangler/config-schema.json",
-  "name": "tcs-local",
+  "name": "tca-local",
   "compatibility_date": "2025-09-17",
   "compatibility_flags": ["nodejs_compat"],
   "account_id": "1422451be59cc2401532ad67d92ae773",
@@ -47,24 +47,24 @@
   },
   "env": {
     "production": {
-      "name": "tcs",
+      "name": "tca",
       "vars": {
         "ENVIRONMENT": "production",
         "DEMO_MODE": "true",
         "TRANSACTIONAL_EMAIL": "noreply@example.com",
-        "BETTER_AUTH_URL": "https://tcs.devxo.workers.dev"
+        "BETTER_AUTH_URL": "https://tca.devxo.workers.dev"
       },
       "d1_databases": [
         {
           "binding": "D1",
-          "database_name": "tcs-d1-production",
-          "database_id": "40661edb-f902-498f-8ce4-d70c06535857"
+          "database_name": "tca-d1-production",
+          "database_id": ""
         }
       ],
       "kv_namespaces": [
         {
           "binding": "KV",
-          "id": "7c255fc45cba4a389ea73fbca48f721d"
+          "id": ""
         }
       ],
       "ratelimits": [
