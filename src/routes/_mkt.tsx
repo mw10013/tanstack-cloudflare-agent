@@ -44,10 +44,10 @@ function Header() {
     <header className="bg-background/95 sticky top-0 z-10 w-full backdrop-blur">
       <div className="flex h-16 items-center justify-between gap-2">
         <div className="flex items-center gap-12">
-          <a href="/" className="flex items-center gap-1">
+          <Link to="/" className="flex items-center gap-1">
             <AppLogo />
             <span className="bg-primary relative top-1 size-1.5" />
-          </a>
+          </Link>
           <div className="hidden items-center gap-6 md:flex">
             <Link
               to="/pricing"
@@ -56,7 +56,7 @@ function Header() {
               Pricing
             </Link>
             <a
-              href="https://github.com/mw10013/tanstack-cloudflare-saas"
+              href="https://github.com/mw10013/tanstack-cloudflare-agent"
               target="_blank"
               rel="noopener noreferrer"
               className="data-hovered:text-primary text-muted-foreground font-medium"
@@ -94,7 +94,7 @@ function GitHubRepoLink({ className }: { className?: string }) {
       aria-label="GitHub repo"
       render={
         <a
-          href="https://github.com/mw10013/tanstack-cloudflare-saas"
+          href="https://github.com/mw10013/tanstack-cloudflare-agent"
           target="_blank"
           rel="noopener noreferrer"
         />
@@ -112,10 +112,10 @@ export function Footer() {
     <footer className="mx-auto flex w-full max-w-5xl flex-col gap-8 py-12">
       <div className="grid gap-8 sm:grid-cols-2 md:grid-cols-4 lg:grid-cols-6">
         <div className="max-w-md space-y-4 md:col-span-2 lg:col-span-4">
-          <a href="/" className="flex items-center gap-1">
+          <Link to="/" className="flex items-center gap-1">
             <AppLogo />
             <span className="bg-primary relative top-1 size-1.5" />
-          </a>
+          </Link>
           <p className="text-muted-foreground text-sm">
             Build and deploy serverless TanStack Start applications on
             Cloudflare.
@@ -184,7 +184,7 @@ export function Footer() {
           <ul className="space-y-2 text-sm">
             <li>
               <a
-                href="https://github.com/mw10013/tanstack-cloudflare-saas"
+                href="https://github.com/mw10013/tanstack-cloudflare-agent"
                 className="text-muted-foreground data-hovered:text-foreground transition-colors"
                 target="_blank"
                 rel="noopener noreferrer"
@@ -197,7 +197,7 @@ export function Footer() {
       </div>
       <div className="border-border/40 flex flex-col items-center justify-between gap-4 border-t border-dashed pt-8 sm:flex-row">
         <p className="text-muted-foreground text-sm">
-          © 2025 TCS. Built with ♥ by{" "}
+          © 2025 TCA. Built with ♥ by{" "}
           <a
             href="https://github.com/mw10013"
             target="_blank"
