@@ -12,6 +12,7 @@
 - Route modules are in `src/routes/` and use file route conventions.
 
 ## Refs
+
 Downloaded source code of libraries are in `refs/` for reference.
 
 ### Reference Docs Locations
@@ -23,6 +24,7 @@ Downloaded source code of libraries are in `refs/` for reference.
 - **Shadcn UI**: `refs/shadcn/apps/v4/content/docs/` (MDX files)
 - **Base UI**: `refs/base-ui/docs/src/app/(docs)/(content)/react/` (MDX files in subdirs)
 - **Better Auth**: `refs/better-auth/docs/content/docs/` (MDX files - plugins, integrations, adapters, guides, concepts, authentication, reference)
+- **Cloudflare Docs**: `refs/cloudflare-docs/src/content/docs/` (MDX files)
 
 ## Commands
 
