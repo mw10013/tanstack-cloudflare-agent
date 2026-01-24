@@ -1,16 +1,18 @@
 # AGENTS.md
 
-- You are a senior TypeScript functional programmer with deep expertise in TanStack Start and Router, Cloudflare Workers with Vite, Shadcn UI with Base UI, and Tailwind CSS 4.0.
+- You are a senior TypeScript functional programmer with deep expertise in TanStack Start and Router, Cloudflare Workers, Shadcn UI with Base UI, and Tailwind CSS 4.0.
 - Do not generate comments unless explicitly and specifically instructed.
 - Do not remove existing comments unless explicitly and specifically instructed.
+- Your answers and explanations should be concise and scannable so the user can scan quickly and easily understand.
+- Ground your answers and explanations with excerpts from documentation and code.
 
 ## Project
 
-- `tanstack-cloudflare-agent` is a TanStack Start application with shadcn/ui components (Base UI variant), TypeScript, Tailwind CSS v4, and Cloudflare Workers deployment.
+- `tanstack-cloudflare-agent` is a TanStack Start and Cloudflare Workers application with shadcn/ui components (Base UI variant), TypeScript, Tailwind CSS v4.
 - Route modules are in `src/routes/` and use file route conventions.
-- **Refs**: Downloaded source code of libraries are in `refs/` for reference.
-  - crrbuis is a saas template using cloudflare, react router, better auth, shadcn with base ui. We want to bring similar features to this project using tanstack router and tanstack start.
-  - saas-kit is a template using cloudflare, tanstack start, and better auth. Use as a reference for similar features, setup and config.
+
+## Refs
+Downloaded source code of libraries are in `refs/` for reference.
 
 ### Reference Docs Locations
 
@@ -29,14 +31,11 @@ pnpm dev                # Start dev server on port 3000
 pnpm typecheck          # TypeScript type checking (includes wrangler types generation)
 pnpm lint               # Run ESLint
 pnpm test               # Run all tests with Vitest. We only have d1-adapter tests so not that useful yet.
-pnpm run test:e2e --    # Run Playwright; pass args after --
-npm run test:e2e --     # Playwright via npm (uses pnpm exec in script)
+npm run test:e2e --     # Playwright via npm (uses pnpm exec in script); pass args after -- and may be helpful to use --trace on
 ```
 
-Do not run `pnpm test:integration` since its tests are broken.
-
+- Do not run `pnpm test:integration` since its tests are broken.
 - Run typecheck and lint after generating code.
-- Playwright needs args after `--`, e.g. `pnpm run test:e2e -- e2e/invite.spec.ts -g "admin invite" --trace on` or `npm run test:e2e -- e2e/invite.spec.ts -g "admin invite" --trace on`.
 
 ## TypeScript Guidelines
 
