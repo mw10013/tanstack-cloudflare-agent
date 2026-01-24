@@ -35,6 +35,7 @@
     "refs:tan-form": "rm -rf refs/tan-form && mkdir -p refs/tan-form && curl -L https://github.com/TanStack/form/archive/refs/tags/@tanstack/react-form@1.27.7.tar.gz | tar -xz -C refs/tan-form --strip-components=1",
     "refs:base-ui": "rm -rf refs/base-ui && mkdir -p refs/base-ui && curl -L https://github.com/mui/base-ui/archive/refs/tags/v1.1.0.tar.gz | tar -xz -C refs/base-ui --strip-components=1",
     "refs:agents": "rm -rf refs/agents && mkdir -p refs/agents && curl -L https://github.com/cloudflare/agents/archive/refs/tags/agents@0.3.6.tar.gz | tar -xz -C refs/agents --strip-components=1",
+    "refs:agents-starter": "rm -rf refs/agents-starter && mkdir -p refs/agents-starter && curl -L https://github.com/cloudflare/agents-starter/archive/refs/heads/main.tar.gz | tar -xz -C refs/agents-starter --strip-components=1",
     "refs:tan-router": "rm -rf refs/tan-router && mkdir -p refs/tan-router && curl -L https://github.com/TanStack/router/archive/refs/tags/v1.156.0.tar.gz | tar -xz -C refs/tan-router --strip-components=1",
     "refs:tan-query": "rm -rf refs/tan-query && mkdir -p refs/tan-query && curl -sL https://github.com/TanStack/query/archive/refs/tags/@tanstack/react-query@5.90.20.tar.gz | tar -xzC refs/tan-query --strip-components=1",
     "refs:tan-start": "rm -rf refs/tan-start && mkdir -p refs/tan-start && curl -L https://github.com/TanStack/router/archive/refs/tags/v1.156.0.tar.gz | tar -xz -C refs/tan-start --strip-components=1",
