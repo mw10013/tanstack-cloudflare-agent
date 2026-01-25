@@ -7,6 +7,7 @@ import {
 } from "@tanstack/react-router";
 import { createServerFn, useServerFn } from "@tanstack/react-start";
 import { getRequest } from "@tanstack/react-start/server";
+import { getAgentByName } from "agents";
 import * as z from "zod";
 import { Button } from "@/components/ui/button";
 import {
@@ -46,8 +47,9 @@ const getLoaderData = createServerFn({ method: "GET" })
       });
       invariant(session, "Missing session");
       const agentName = `user:${session.user.id}`;
-      const { ok, now, agentId } =
-        await env.USER_AGENT.getByName(agentName).ping();
+      const { ok, now, agentId } = await (
+        await getAgentByName(env.USER_AGENT, agentName)
+      ).ping();
       const dashboardData = await repository.getAppDashboardData({
         userEmail: session.user.email,
         organizationId,
