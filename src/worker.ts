@@ -18,6 +18,9 @@ export interface ServerContext {
   organizations?: AuthService["$Infer"]["Organization"][];
 }
 
+/**
+ * Agent routes use /agents/:agent/:name with per-user name `user:${session.user.id}`.
+ */
 const extractAgentName = (request: Request) => {
   const { pathname } = new URL(request.url);
   const segments = pathname.split("/").filter(Boolean);
