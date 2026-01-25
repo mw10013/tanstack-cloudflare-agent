@@ -68,6 +68,19 @@ const acceptInvitation = createServerFn({ method: "POST" })
     });
   });
 
+const feeFi = createServerFn({ method: "POST" }).handler(
+  async ({ context: { authService, env } }): Promise<string> => {
+    const request = getRequest();
+    const session = await authService.api.getSession({
+      headers: request.headers,
+    });
+    invariant(session, "Missing session");
+    const agentName = `user:${session.user.id}`;
+    const agent = await getAgentByName(env.USER_AGENT, agentName);
+    return await agent.feeFi();
+  },
+);
+
 const rejectInvitation = createServerFn({ method: "POST" })
   .inputValidator(invitationIdSchema)
   .handler(async ({ data: { invitationId }, context: { authService } }) => {
@@ -81,6 +94,11 @@ const rejectInvitation = createServerFn({ method: "POST" })
 function RouteComponent() {
   const { userInvitations, memberCount, pendingInvitationCount, agent } =
     Route.useLoaderData();
+  const isHydrated = useHydrated();
+  const feeFiServerFn = useServerFn(feeFi);
+  const feeFiMutation = useMutation<string>({
+    mutationFn: () => feeFiServerFn(),
+  });
 
   return (
     <div className="flex flex-col gap-6 p-6">
@@ -135,6 +153,20 @@ function RouteComponent() {
           <CardContent>
             <div className="text-muted-foreground text-sm">{agent.now}</div>
             <div className="text-sm">{agent.agentId}</div>
+            <div className="text-muted-foreground text-sm">
+              {feeFiMutation.data ?? "No response yet"}
+            </div>
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              disabled={!isHydrated || feeFiMutation.isPending}
+              onClick={() => {
+                feeFiMutation.mutate();
+              }}
+            >
+              FeeFi
+            </Button>
           </CardContent>
         </Card>
       </div>

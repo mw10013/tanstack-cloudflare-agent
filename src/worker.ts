@@ -38,6 +38,23 @@ export class UserAgent extends Agent<Env> {
       agentId: this.ctx.id.toString(),
     };
   }
+
+  async feeFi(): Promise<string> {
+    const ai = this.env.AI;
+    const response = await ai.run(
+      "@cf/meta/llama-3.1-8b-instruct-awq",
+      { prompt: "fee fi" },
+      {
+        gateway: {
+          id: this.env.AI_GATEWAY_ID,
+          skipCache: false,
+          cacheTtl: 3360,
+        },
+      },
+    );
+    const output = response.response;
+    return output && output.trim().length > 0 ? output : "No response";
+  }
 }
 
 declare module "@tanstack/react-start" {
