@@ -81,6 +81,19 @@ const feeFi = createServerFn({ method: "POST" }).handler(
   },
 );
 
+const feeFi1 = createServerFn({ method: "POST" }).handler(
+  async ({ context: { authService, env } }): Promise<string> => {
+    const request = getRequest();
+    const session = await authService.api.getSession({
+      headers: request.headers,
+    });
+    invariant(session, "Missing session");
+    const agentName = `user:${session.user.id}`;
+    const agent = await getAgentByName(env.USER_AGENT, agentName);
+    return await agent.feeFi1();
+  },
+);
+
 const rejectInvitation = createServerFn({ method: "POST" })
   .inputValidator(invitationIdSchema)
   .handler(async ({ data: { invitationId }, context: { authService } }) => {
@@ -96,8 +109,12 @@ function RouteComponent() {
     Route.useLoaderData();
   const isHydrated = useHydrated();
   const feeFiServerFn = useServerFn(feeFi);
+  const feeFi1ServerFn = useServerFn(feeFi1);
   const feeFiMutation = useMutation<string>({
     mutationFn: () => feeFiServerFn(),
+  });
+  const feeFi1Mutation = useMutation<string>({
+    mutationFn: () => feeFi1ServerFn(),
   });
 
   return (
@@ -156,17 +173,33 @@ function RouteComponent() {
             <div className="text-muted-foreground text-sm">
               {feeFiMutation.data ?? "No response yet"}
             </div>
-            <Button
-              type="button"
-              variant="outline"
-              size="sm"
-              disabled={!isHydrated || feeFiMutation.isPending}
-              onClick={() => {
-                feeFiMutation.mutate();
-              }}
-            >
-              FeeFi
-            </Button>
+            <div className="text-muted-foreground text-sm">
+              {feeFi1Mutation.data ?? "No response yet"}
+            </div>
+            <div className="flex flex-wrap gap-2">
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                disabled={!isHydrated || feeFiMutation.isPending}
+                onClick={() => {
+                  feeFiMutation.mutate();
+                }}
+              >
+                FeeFi
+              </Button>
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                disabled={!isHydrated || feeFi1Mutation.isPending}
+                onClick={() => {
+                  feeFi1Mutation.mutate();
+                }}
+              >
+                FeeFi1
+              </Button>
+            </div>
           </CardContent>
         </Card>
       </div>

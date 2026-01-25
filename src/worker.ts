@@ -1,8 +1,10 @@
 import type { AuthService } from "@/lib/auth-service";
 import type { Repository } from "@/lib/repository";
 import type { StripeService } from "@/lib/stripe-service";
+import { createOpenAI } from "@ai-sdk/openai";
 import serverEntry from "@tanstack/react-start/server-entry";
 import { Agent, routeAgentRequest } from "agents";
+import { generateText } from "ai";
 import { createAuthService } from "@/lib/auth-service";
 import { createD1SessionService } from "@/lib/d1-session-service";
 import { createRepository } from "@/lib/repository";
@@ -54,6 +56,24 @@ export class UserAgent extends Agent<Env> {
     );
     const output = response.response;
     return output && output.trim().length > 0 ? output : "No response";
+  }
+
+  async feeFi1(): Promise<string> {
+    const gatewayUrl = await this.env.AI.gateway(this.env.AI_GATEWAY_ID).getUrl(
+      "workers-ai",
+    );
+    const openai = createOpenAI({
+      baseURL: `${gatewayUrl}/v1`,
+      apiKey: this.env.WORKERS_AI_API_TOKEN,
+      headers: {
+        "cf-aig-authorization": `Bearer ${this.env.AI_GATEWAY_TOKEN}`,
+      },
+    });
+    const { text } = await generateText({
+      model: openai.chat("@cf/meta/llama-3.1-8b-instruct-awq"),
+      prompt: "fee fi",
+    });
+    return text && text.trim().length > 0 ? text : "No response";
   }
 }
 
