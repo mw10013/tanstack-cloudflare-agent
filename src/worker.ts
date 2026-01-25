@@ -2,7 +2,7 @@ import type { AuthService } from "@/lib/auth-service";
 import type { Repository } from "@/lib/repository";
 import type { StripeService } from "@/lib/stripe-service";
 import serverEntry from "@tanstack/react-start/server-entry";
-import { Agent } from "agents";
+import { Agent, routeAgentRequest } from "agents";
 import { createAuthService } from "@/lib/auth-service";
 import { createD1SessionService } from "@/lib/d1-session-service";
 import { createRepository } from "@/lib/repository";
@@ -17,6 +17,15 @@ export interface ServerContext {
   organization?: AuthService["$Infer"]["Organization"];
   organizations?: AuthService["$Infer"]["Organization"][];
 }
+
+const extractAgentName = (request: Request) => {
+  const { pathname } = new URL(request.url);
+  const segments = pathname.split("/").filter(Boolean);
+  if (segments.length < 3 || segments[0] !== "agents") {
+    return null;
+  }
+  return segments[2] ?? null;
+};
 
 export class UserAgent extends Agent<Env> {
   ping() {
@@ -68,6 +77,37 @@ export default {
       transactionalEmail: env.TRANSACTIONAL_EMAIL,
       stripeWebhookSecret: env.STRIPE_WEBHOOK_SECRET,
     });
+    const routed = await routeAgentRequest(request, env, {
+      onBeforeConnect: async (req) => {
+        const session = await authService.api.getSession({
+          headers: req.headers,
+        });
+        if (!session) {
+          return new Response("Unauthorized", { status: 401 });
+        }
+        const agentName = extractAgentName(req);
+        if (agentName !== `user:${session.user.id}`) {
+          return new Response("Forbidden", { status: 403 });
+        }
+        return undefined;
+      },
+      onBeforeRequest: async (req) => {
+        const session = await authService.api.getSession({
+          headers: req.headers,
+        });
+        if (!session) {
+          return new Response("Unauthorized", { status: 401 });
+        }
+        const agentName = extractAgentName(req);
+        if (agentName !== `user:${session.user.id}`) {
+          return new Response("Forbidden", { status: 403 });
+        }
+        return undefined;
+      },
+    });
+    if (routed) {
+      return routed;
+    }
     const session = await authService.api.getSession({
       headers: request.headers,
     });
