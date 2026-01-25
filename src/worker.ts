@@ -2,6 +2,7 @@ import type { AuthService } from "@/lib/auth-service";
 import type { Repository } from "@/lib/repository";
 import type { StripeService } from "@/lib/stripe-service";
 import serverEntry from "@tanstack/react-start/server-entry";
+import { Agent } from "agents";
 import { createAuthService } from "@/lib/auth-service";
 import { createD1SessionService } from "@/lib/d1-session-service";
 import { createRepository } from "@/lib/repository";
@@ -15,6 +16,16 @@ export interface ServerContext {
   session?: AuthService["$Infer"]["Session"];
   organization?: AuthService["$Infer"]["Organization"];
   organizations?: AuthService["$Infer"]["Organization"][];
+}
+
+export class UserAgent extends Agent<Env> {
+  ping() {
+    return {
+      ok: true,
+      now: new Date().toISOString(),
+      agentId: this.ctx.id.toString(),
+    };
+  }
 }
 
 declare module "@tanstack/react-start" {

@@ -20,6 +20,20 @@
   "observability": {
     "enabled": true
   },
+  "durable_objects": {
+    "bindings": [
+      {
+        "name": "USER_AGENT",
+        "class_name": "UserAgent"
+      }
+    ]
+  },
+  "migrations": [
+    {
+      "tag": "v1",
+      "new_sqlite_classes": ["UserAgent"]
+    }
+  ],
   "d1_databases": [
     {
       "binding": "D1",
@@ -76,6 +90,20 @@
             "limit": 5,
             "period": 60
           }
+        }
+      ],
+      "durable_objects": {
+        "bindings": [
+          {
+            "name": "USER_AGENT",
+            "class_name": "UserAgent"
+          }
+        ]
+      },
+      "migrations": [
+        {
+          "tag": "v1",
+          "new_sqlite_classes": ["UserAgent"]
         }
       ],
       "triggers": {

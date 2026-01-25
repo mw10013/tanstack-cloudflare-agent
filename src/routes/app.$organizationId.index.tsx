@@ -38,17 +38,21 @@ const getLoaderData = createServerFn({ method: "GET" })
   .handler(
     async ({
       data: { organizationId },
-      context: { authService, repository },
+      context: { authService, repository, env },
     }) => {
       const request = getRequest();
       const session = await authService.api.getSession({
         headers: request.headers,
       });
       invariant(session, "Missing session");
-      return repository.getAppDashboardData({
+      const agentName = `user:${session.user.id}`;
+      const { ok, now, agentId } =
+        await env.USER_AGENT.getByName(agentName).ping();
+      const dashboardData = await repository.getAppDashboardData({
         userEmail: session.user.email,
         organizationId,
       });
+      return { ...dashboardData, agent: { ok, now, agentId } };
     },
   );
 
@@ -73,7 +77,7 @@ const rejectInvitation = createServerFn({ method: "POST" })
   });
 
 function RouteComponent() {
-  const { userInvitations, memberCount, pendingInvitationCount } =
+  const { userInvitations, memberCount, pendingInvitationCount, agent } =
     Route.useLoaderData();
 
   return (
@@ -118,6 +122,17 @@ function RouteComponent() {
           </CardHeader>
           <CardContent>
             <div className="text-2xl font-bold">{pendingInvitationCount}</div>
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader>
+            <CardTitle>Agent Ping</CardTitle>
+            <CardDescription>User agent response</CardDescription>
+          </CardHeader>
+          <CardContent>
+            <div className="text-muted-foreground text-sm">{agent.now}</div>
+            <div className="text-sm">{agent.agentId}</div>
           </CardContent>
         </Card>
       </div>
