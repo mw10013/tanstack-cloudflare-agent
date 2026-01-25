@@ -1,6 +1,6 @@
 # AI Gateway with Agents SDK and AI SDK
 
-Based on scanning the Cloudflare docs on AI Gateway, here are the viable approaches for using AI Gateway with the Agent SDK and AI SDK, focusing on Cloudflare LLMs (Workers AI models). You have the necessary tokens (`CF_WORKERS_AI_API_TOKEN` for Workers AI and `CF_AI_GATEWAY_TOKEN` for AI Gateway auth).
+Based on scanning the Cloudflare docs on AI Gateway, here are the viable approaches for using AI Gateway with the Agent SDK and AI SDK, focusing on Cloudflare LLMs (Workers AI models). You have the necessary tokens (`WORKERS_AI_API_TOKEN` for Workers AI and `AI_GATEWAY_TOKEN` for AI Gateway auth).
 
 ## Options for Cloudflare LLM Usage
 
@@ -37,7 +37,7 @@ Based on scanning the Cloudflare docs on AI Gateway, here are the viable approac
 
      const openai = createOpenAI({
        baseURL: `https://gateway.ai.cloudflare.com/v1/${accountId}/${gatewayId}/openai`,
-       apiKey: this.env.CF_AI_GATEWAY_TOKEN, // For auth
+       apiKey: this.env.AI_GATEWAY_TOKEN, // For auth
      });
 
      const { text } = await generateText({
@@ -72,7 +72,7 @@ Based on scanning the Cloudflare docs on AI Gateway, here are the viable approac
 
 - **Best for Cloudflare LLMs**: Approach 1 (Workers AI binding) is most direct for Cloudflare models, with gateway for enhancements.
 - **Best for Flexibility**: Approach 2 or 3 if you need AI SDK features and plan to route between providers.
-- **Auth**: Use `CF_AI_GATEWAY_TOKEN` in headers or SDK config for gateway auth; `CF_WORKERS_AI_API_TOKEN` for Workers AI direct access.
+- **Auth**: Use `AI_GATEWAY_TOKEN` in headers or SDK config for gateway auth; `WORKERS_AI_API_TOKEN` for Workers AI direct access.
 - **Setup Gateway**: Create an AI Gateway in the Cloudflare dashboard, enable authentication, and configure BYOK or unified billing for keys.
 
 All approaches support caching, rate limiting, and fallbacks via AI Gateway. Start with Workers AI binding for simplicity with Cloudflare LLMs.

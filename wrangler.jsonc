@@ -15,7 +15,8 @@
     "TRANSACTIONAL_EMAIL": "noreply@example.com",
     "BETTER_AUTH_URL": "http://localhost:3000",
     "ANALYTICS_TOKEN": "",
-    "EMAIL_WHITELIST": ""
+    "EMAIL_WHITELIST": "",
+    "AI_GATEWAY_ID": "saas-ai-gateway"
   },
   "observability": {
     "enabled": true
@@ -57,6 +58,9 @@
       }
     }
   ],
+  "ai": {
+    "binding": "AI"
+  },
   "triggers": {
     "crons": ["0 0 * * *"]
   },
@@ -67,7 +71,8 @@
         "ENVIRONMENT": "production",
         "DEMO_MODE": "true",
         "TRANSACTIONAL_EMAIL": "noreply@example.com",
-        "BETTER_AUTH_URL": "https://tca.devxo.workers.dev"
+        "BETTER_AUTH_URL": "https://tca.devxo.workers.dev",
+        "AI_GATEWAY_ID": "saas-ai-gateway"
       },
       "d1_databases": [
         {
@@ -106,6 +111,9 @@
           "new_sqlite_classes": ["UserAgent"]
         }
       ],
+      "ai": {
+        "binding": "AI"
+      },
       "triggers": {
         "crons": ["0 0 * * *"]
       }
