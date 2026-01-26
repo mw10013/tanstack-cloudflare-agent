@@ -125,6 +125,9 @@ importers:
       vite-tsconfig-paths:
         specifier: 6.0.3
         version: 6.0.3(typescript@5.9.3)(vite@7.3.0(@types/node@25.0.3)(jiti@2.6.1)(lightningcss@1.30.2)(tsx@4.21.0))
+      workers-ai-provider:
+        specifier: 3.0.2
+        version: 3.0.2(@ai-sdk/provider-utils@4.0.9(zod@4.3.3))(@ai-sdk/provider@3.0.5)(ai@6.0.49(zod@4.3.3))(zod@4.3.3)
       zod:
         specifier: 4.3.3
         version: 4.3.3
@@ -5649,6 +5652,14 @@ packages:
     resolution: {integrity: sha512-R6X/VQOkwLTBGLp4VRUwLQZZVxZ9T9J8pGiJ6GQUMaRkY7TVWrCSkVfoNMM1/YyFsY5UYhhPoQe5IehnhZ3Pdw==}
     engines: {node: '>=16'}
     hasBin: true
+
+  workers-ai-provider@3.0.2:
+    resolution: {integrity: sha512-HUPu5aQrPOHHaoBiRoUiNzK5wtVtCFl0g/OO3gk9wguGEUK4m81qrqmdte6xlkWeKtujCHIDfIdIN6rZAnzVew==}
+    peerDependencies:
+      '@ai-sdk/provider': ^3.0.0
+      '@ai-sdk/provider-utils': ^4.0.0
+      ai: ^6.0.0
+      zod: ^3.25.0 || ^4.0.0
 
   wrangler@4.60.0:
     resolution: {integrity: sha512-n4kibm/xY0Qd5G2K/CbAQeVeOIlwPNVglmFjlDRCCYk3hZh8IggO/rg8AXt/vByK2Sxsugl5Z7yvgWxrUbmS6g==}
@@ -11548,6 +11559,13 @@ snapshots:
       '@cloudflare/workerd-linux-64': 1.20260120.0
       '@cloudflare/workerd-linux-arm64': 1.20260120.0
       '@cloudflare/workerd-windows-64': 1.20260120.0
+
+  workers-ai-provider@3.0.2(@ai-sdk/provider-utils@4.0.9(zod@4.3.3))(@ai-sdk/provider@3.0.5)(ai@6.0.49(zod@4.3.3))(zod@4.3.3):
+    dependencies:
+      '@ai-sdk/provider': 3.0.5
+      '@ai-sdk/provider-utils': 4.0.9(zod@4.3.3)
+      ai: 6.0.49(zod@4.3.3)
+      zod: 4.3.3
 
   wrangler@4.60.0(@cloudflare/workers-types@4.20260124.0):
     dependencies:

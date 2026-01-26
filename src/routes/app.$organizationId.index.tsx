@@ -94,6 +94,19 @@ const feeFi1 = createServerFn({ method: "POST" }).handler(
   },
 );
 
+const feeFi2 = createServerFn({ method: "POST" }).handler(
+  async ({ context: { authService, env } }): Promise<string> => {
+    const request = getRequest();
+    const session = await authService.api.getSession({
+      headers: request.headers,
+    });
+    invariant(session, "Missing session");
+    const agentName = `user:${session.user.id}`;
+    const agent = await getAgentByName(env.USER_AGENT, agentName);
+    return await agent.feeFi2();
+  },
+);
+
 const rejectInvitation = createServerFn({ method: "POST" })
   .inputValidator(invitationIdSchema)
   .handler(async ({ data: { invitationId }, context: { authService } }) => {
@@ -110,11 +123,15 @@ function RouteComponent() {
   const isHydrated = useHydrated();
   const feeFiServerFn = useServerFn(feeFi);
   const feeFi1ServerFn = useServerFn(feeFi1);
+  const feeFi2ServerFn = useServerFn(feeFi2);
   const feeFiMutation = useMutation<string>({
     mutationFn: () => feeFiServerFn(),
   });
   const feeFi1Mutation = useMutation<string>({
     mutationFn: () => feeFi1ServerFn(),
+  });
+  const feeFi2Mutation = useMutation<string>({
+    mutationFn: () => feeFi2ServerFn(),
   });
 
   return (
@@ -176,6 +193,9 @@ function RouteComponent() {
             <div className="text-muted-foreground text-sm">
               {feeFi1Mutation.data ?? "No response yet"}
             </div>
+            <div className="text-muted-foreground text-sm">
+              {feeFi2Mutation.data ?? "No response yet"}
+            </div>
             <div className="flex flex-wrap gap-2">
               <Button
                 type="button"
@@ -198,6 +218,17 @@ function RouteComponent() {
                 }}
               >
                 FeeFi1
+              </Button>
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                disabled={!isHydrated || feeFi2Mutation.isPending}
+                onClick={() => {
+                  feeFi2Mutation.mutate();
+                }}
+              >
+                FeeFi2
               </Button>
             </div>
           </CardContent>
