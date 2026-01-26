@@ -47,9 +47,11 @@
   },
   "dependencies": {
     "@ai-sdk/openai": "3.0.18",
+    "@ai-sdk/react": "^3.0.51",
     "@base-ui/react": "1.1.0",
     "@better-auth/core": "1.4.17",
     "@better-auth/stripe": "1.4.17",
+    "@cloudflare/ai-chat": "0.0.3",
     "@cloudflare/vite-plugin": "1.21.2",
     "@epic-web/invariant": "1.0.0",
     "@radix-ui/react-use-controllable-state": "^1.2.2",

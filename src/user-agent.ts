@@ -1,5 +1,6 @@
-import { Agent } from "agents";
-import { generateText } from "ai";
+import type { StreamTextOnFinishCallback, ToolSet } from "ai";
+import { AIChatAgent } from "@cloudflare/ai-chat";
+import { convertToModelMessages, generateText, streamText } from "ai";
 import { createOpenAI } from "ai-gateway-provider/providers/openai";
 import { createWorkersAI } from "workers-ai-provider";
 
@@ -12,13 +13,30 @@ export const extractAgentName = (request: Request) => {
   return segments[2] ?? null;
 };
 
-export class UserAgent extends Agent<Env> {
+export class UserAgent extends AIChatAgent<Env> {
   ping() {
     return {
       ok: true,
       now: new Date().toISOString(),
       agentId: this.ctx.id.toString(),
     };
+  }
+
+  async onChatMessage(onFinish: StreamTextOnFinishCallback<ToolSet>) {
+    const workersai = createWorkersAI({
+      binding: this.env.AI,
+      gateway: {
+        id: this.env.AI_GATEWAY_ID,
+        skipCache: false,
+        cacheTtl: 3360,
+      },
+    });
+    const result = streamText({
+      model: workersai("@cf/meta/llama-3.1-8b-instruct-awq"),
+      messages: await convertToModelMessages(this.messages),
+      onFinish,
+    });
+    return result.toUIMessageStreamResponse();
   }
 
   async feeFi(): Promise<string> {

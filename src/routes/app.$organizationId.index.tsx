@@ -1,3 +1,9 @@
+import type {
+  PromptInputMessage,
+  PromptInputSubmitProps,
+} from "@/components/ai-elements/prompt-input";
+import type { UIMessage } from "ai";
+import { useAgentChat } from "@cloudflare/ai-chat/react";
 import { invariant } from "@epic-web/invariant";
 import { useMutation } from "@tanstack/react-query";
 import {
@@ -8,7 +14,26 @@ import {
 import { createServerFn, useServerFn } from "@tanstack/react-start";
 import { getRequest } from "@tanstack/react-start/server";
 import { getAgentByName } from "agents";
+import { useAgent } from "agents/react";
 import * as z from "zod";
+import {
+  Conversation,
+  ConversationContent,
+  ConversationEmptyState,
+  ConversationScrollButton,
+} from "@/components/ai-elements/conversation";
+import {
+  Message,
+  MessageContent,
+  MessageResponse,
+} from "@/components/ai-elements/message";
+import {
+  PromptInput,
+  PromptInputBody,
+  PromptInputFooter,
+  PromptInputSubmit,
+  PromptInputTextarea,
+} from "@/components/ai-elements/prompt-input";
 import { Button } from "@/components/ui/button";
 import {
   Card,
@@ -54,7 +79,7 @@ const getLoaderData = createServerFn({ method: "GET" })
         userEmail: session.user.email,
         organizationId,
       });
-      return { ...dashboardData, agent: { ok, now, agentId } };
+      return { ...dashboardData, agent: { ok, now, agentId, agentName } };
     },
   );
 
@@ -121,6 +146,7 @@ function RouteComponent() {
   const { userInvitations, memberCount, pendingInvitationCount, agent } =
     Route.useLoaderData();
   const isHydrated = useHydrated();
+  const agentName = agent.agentName;
   const feeFiServerFn = useServerFn(feeFi);
   const feeFi1ServerFn = useServerFn(feeFi1);
   const feeFi2ServerFn = useServerFn(feeFi2);
@@ -133,6 +159,23 @@ function RouteComponent() {
   const feeFi2Mutation = useMutation<string>({
     mutationFn: () => feeFi2ServerFn(),
   });
+  const chatAgent = useAgent({
+    agent: "user-agent",
+    name: agentName,
+  });
+  const {
+    messages: rawMessages,
+    sendMessage,
+    status,
+  } = useAgentChat({
+    agent: chatAgent,
+    getInitialMessages: () => Promise.resolve([]),
+  });
+  const safeChatMessages = rawMessages as UIMessage[];
+  const safeSendMessage = sendMessage as unknown as (
+    message: UIMessage,
+  ) => Promise<unknown>;
+  const safeStatus = status as PromptInputSubmitProps["status"];
 
   return (
     <div className="flex flex-col gap-6 p-6">
@@ -234,6 +277,63 @@ function RouteComponent() {
           </CardContent>
         </Card>
       </div>
+
+      <Card>
+        <CardHeader>
+          <CardTitle>Agent Chat</CardTitle>
+          <CardDescription>Chat with your user agent</CardDescription>
+        </CardHeader>
+        <CardContent className="flex flex-col gap-4">
+          <div className="h-96 rounded-md border">
+            <Conversation className="h-full">
+              <ConversationContent>
+                {safeChatMessages.map((message) => (
+                  <Message from={message.role} key={message.id}>
+                    <MessageContent>
+                      {message.parts.map((part, index) =>
+                        part.type === "text" ? (
+                          <MessageResponse
+                            key={`${message.id}-${String(index)}`}
+                          >
+                            {part.text}
+                          </MessageResponse>
+                        ) : null,
+                      )}
+                    </MessageContent>
+                  </Message>
+                ))}
+
+                {safeChatMessages.length === 0 && (
+                  <ConversationEmptyState
+                    description="Send a message to start the conversation."
+                    title="No messages"
+                  />
+                )}
+              </ConversationContent>
+              <ConversationScrollButton />
+            </Conversation>
+          </div>
+          <PromptInput
+            onSubmit={async ({ text }: PromptInputMessage) => {
+              if (!text.trim()) {
+                return;
+              }
+              await safeSendMessage({
+                id: crypto.randomUUID(),
+                role: "user",
+                parts: [{ type: "text", text }],
+              });
+            }}
+          >
+            <PromptInputBody>
+              <PromptInputTextarea placeholder="Ask your agent..." />
+            </PromptInputBody>
+            <PromptInputFooter className="justify-end">
+              <PromptInputSubmit status={safeStatus} />
+            </PromptInputFooter>
+          </PromptInput>
+        </CardContent>
+      </Card>
     </div>
   );
 }
