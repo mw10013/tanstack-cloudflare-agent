@@ -23,6 +23,7 @@ export default defineConfig(
     "src/components/ui/progress.tsx",
     "src/components/ui/sidebar.tsx",
     "src/components/ui/toggle-group.tsx",
+    "src/components/ai-elements/",
     "src/hooks/use-mobile.ts",
   ]),
 
