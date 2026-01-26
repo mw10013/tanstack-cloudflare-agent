@@ -141,6 +141,8 @@ pnpm test:e2e
 
 ```bash
 pnpm dlx shadcn@latest add --overwrite accordion alert-dialog alert aspect-ratio avatar badge breadcrumb button-group button calendar card carousel chart checkbox collapsible combobox command context-menu dialog drawer dropdown-menu empty field input-group input item label pagination popover radio-group select separator sidebar sonner spinner switch table textarea toggle tooltip
+
+pnpm dlx shadcn@latest add https://ai-sdk.dev/elements/api/registry/all.json
 ```
 
 ## Credit
