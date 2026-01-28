@@ -106,6 +106,7 @@
     "zod": "4.3.3"
   },
   "devDependencies": {
+    "@babel/plugin-proposal-decorators": "^7.28.6",
     "@better-auth/cli": "1.4.17",
     "@cloudflare/vitest-pool-workers": "0.12.6",
     "@eslint/js": "9.39.2",

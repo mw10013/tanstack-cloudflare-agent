@@ -1,5 +1,6 @@
 import type { StreamTextOnFinishCallback, ToolSet } from "ai";
 import { AIChatAgent } from "@cloudflare/ai-chat";
+import { callable } from "agents";
 import { convertToModelMessages, generateText, streamText } from "ai";
 import { createOpenAI } from "ai-gateway-provider/providers/openai";
 import { createWorkersAI } from "workers-ai-provider";
@@ -20,6 +21,11 @@ export class UserAgent extends AIChatAgent<Env> {
       now: new Date().toISOString(),
       agentId: this.ctx.id.toString(),
     };
+  }
+
+  @callable()
+  bang() {
+    return "bang";
   }
 
   async onChatMessage(onFinish: StreamTextOnFinishCallback<ToolSet>) {

@@ -176,6 +176,9 @@ function RouteComponent() {
     message: UIMessage,
   ) => Promise<unknown>;
   const safeStatus = status as PromptInputSubmitProps["status"];
+  const bangMutation = useMutation<string>({
+    mutationFn: () => chatAgent.call<string>("bang"),
+  });
 
   return (
     <div className="flex flex-col gap-6 p-6">
@@ -239,6 +242,9 @@ function RouteComponent() {
             <div className="text-muted-foreground text-sm">
               {feeFi2Mutation.data ?? "No response yet"}
             </div>
+            <div className="text-muted-foreground text-sm">
+              {bangMutation.data ?? "No response yet"}
+            </div>
             <div className="flex flex-wrap gap-2">
               <Button
                 type="button"
@@ -272,6 +278,17 @@ function RouteComponent() {
                 }}
               >
                 FeeFi2
+              </Button>
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                disabled={!isHydrated || bangMutation.isPending}
+                onClick={() => {
+                  bangMutation.mutate();
+                }}
+              >
+                Bang
               </Button>
             </div>
           </CardContent>

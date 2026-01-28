@@ -2,73 +2,40 @@
 
 ## Issue
 
-Calling `bang()` on `UserAgent` via `useAgent` results in `RPC error: Method bang is not callable`. The `@callable()` decorator also shows a TypeScript error about incompatible decorator signatures when `experimentalDecorators` is enabled.
+The dev server fails to start with `SyntaxError: Invalid or unexpected token` when using `@callable()` decorator on agent methods.
 
-## Analysis
+## Root Cause
 
-### Agents uses standard decorators
+**Vite's default esbuild transformer does not support ES2022 (stage-3) decorators.**
 
-The Agents SDK implements `callable()` using the stage-3 decorator signature (`ClassMethodDecoratorContext`), not the legacy `experimentalDecorators` signature:
+The Agents SDK uses standard ES2022 decorators (`ClassMethodDecoratorContext`), not legacy `experimentalDecorators`. When Vite processes `src/user-agent.ts`, esbuild sees `@callable()` as invalid syntax and throws a parse error.
 
-```
-export function callable(metadata: CallableMetadata = {}) {
-  return function callableDecorator<This, Args extends unknown[], Return>(
-    target: (this: This, ...args: Args) => Return,
-    context: ClassMethodDecoratorContext
-  ) {
-    if (!callableMetadata.has(target)) {
-      callableMetadata.set(target, metadata);
-    }
-    return target;
-  };
-}
-```
+### Why Agents Examples Work
 
-Source: `refs/agents/packages/agents/src/index.ts`
+The Agents examples use `@vitejs/plugin-react` without explicit decorator config because they run directly on workerd via wrangler, not through Vite's SSR transform pipeline. When running TanStack Start with the Cloudflare Vite plugin, Vite must transpile decorators before workerd receives the code.
 
-This means `experimentalDecorators` should be disabled; legacy decorators break the callable metadata registration.
+## Solution
 
-### Agents examples do not enable experimentalDecorators
+Configure `@vitejs/plugin-react` to transpile ES2022 decorators using Babel:
 
-The Agents repo base tsconfig has `experimentalDecorators` commented out. Examples use the Cloudflare Vite plugin without extra decorator config.
+1. Install the Babel decorator plugin:
 
-Sources:
+   ```bash
+   pnpm add -D @babel/plugin-proposal-decorators
+   ```
 
-- `refs/agents/tsconfig.base.json`
-- `refs/agents/examples/playground/vite.config.ts`
+2. Configure vite.config.ts:
+   ```ts
+   viteReact({
+     babel: {
+       plugins: [["@babel/plugin-proposal-decorators", { version: "2023-11" }]],
+     },
+   }),
+   ```
 
-### Runtime error path
+The `version: "2023-11"` option uses the finalized decorator spec (stage-3), which matches the Agents SDK's decorator implementation.
 
-The error is thrown by Agents runtime when a method is not marked callable:
+## Notes
 
-```
-if (!this._isCallable(method)) throw new Error(`Method ${method} is not callable`);
-```
-
-Source: `node_modules/agents/dist/src-C_iKczoR.js`
-
-This implies the decorator did not run or did not register metadata at runtime.
-
-### Workers RPC is enabled
-
-`wrangler.jsonc` uses `compatibility_date: "2025-09-17"`, which satisfies the Workers RPC requirement (`>= 2024-04-03`).
-
-Source: `wrangler.jsonc`
-
-## What was tried (did not resolve)
-
-1. Enabling `experimentalDecorators` in `tsconfig.json`.
-   - This fixes the parse error in dev but causes a type mismatch with the Agents decorator signature.
-   - It still results in `Method bang is not callable` at runtime.
-
-2. Manually simulating the decorator registration.
-   - Attempted to invoke `callable()(method, {})` manually.
-   - This bypasses the decorator system but is not acceptable as a long-term fix.
-
-3. Searching Vite SSR output for decorator transformation.
-   - No clear evidence that `@callable` or `UserAgent` is transformed in `node_modules/.vite/deps_ssr`.
-   - Matches found were unrelated (Mermaid “bang” node).
-
-## Open question
-
-Why do the Agents examples work with the Cloudflare Vite plugin and standard decorators, while this app fails to register callable metadata? The likely gap is in how decorators are transformed (or not transformed) in the SSR pipeline for this app.
+- Do NOT enable `experimentalDecorators` in tsconfig.json — that's for legacy TypeScript decorators and will cause type errors with the Agents SDK.
+- The `2023-11` version corresponds to the TC39 decorators proposal that reached stage-3 in 2022 and was finalized.
