@@ -71,7 +71,8 @@ const getLoaderData = createServerFn({ method: "GET" })
         headers: request.headers,
       });
       invariant(session, "Missing session");
-      const agentName = `user:${session.user.id}`;
+      const agentName = session.session.activeOrganizationId;
+      invariant(agentName, "Missing active organization");
       const { ok, now, agentId } = await (
         await getAgentByName(env.USER_AGENT, agentName)
       ).ping();
@@ -100,7 +101,8 @@ const feeFi = createServerFn({ method: "POST" }).handler(
       headers: request.headers,
     });
     invariant(session, "Missing session");
-    const agentName = `user:${session.user.id}`;
+    const agentName = session.session.activeOrganizationId;
+    invariant(agentName, "Missing active organization");
     const agent = await getAgentByName(env.USER_AGENT, agentName);
     return await agent.feeFi();
   },
@@ -113,7 +115,8 @@ const feeFi1 = createServerFn({ method: "POST" }).handler(
       headers: request.headers,
     });
     invariant(session, "Missing session");
-    const agentName = `user:${session.user.id}`;
+    const agentName = session.session.activeOrganizationId;
+    invariant(agentName, "Missing active organization");
     const agent = await getAgentByName(env.USER_AGENT, agentName);
     return await agent.feeFi1();
   },
@@ -126,7 +129,8 @@ const feeFi2 = createServerFn({ method: "POST" }).handler(
       headers: request.headers,
     });
     invariant(session, "Missing session");
-    const agentName = `user:${session.user.id}`;
+    const agentName = session.session.activeOrganizationId;
+    invariant(agentName, "Missing active organization");
     const agent = await getAgentByName(env.USER_AGENT, agentName);
     return await agent.feeFi2();
   },

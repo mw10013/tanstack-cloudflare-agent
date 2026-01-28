@@ -70,7 +70,8 @@ export default {
           return new Response("Unauthorized", { status: 401 });
         }
         const agentName = extractAgentName(req);
-        if (agentName !== `user:${session.user.id}`) {
+        const activeOrganizationId = session.session.activeOrganizationId;
+        if (!activeOrganizationId || agentName !== activeOrganizationId) {
           return new Response("Forbidden", { status: 403 });
         }
         return undefined;
@@ -83,7 +84,8 @@ export default {
           return new Response("Unauthorized", { status: 401 });
         }
         const agentName = extractAgentName(req);
-        if (agentName !== `user:${session.user.id}`) {
+        const activeOrganizationId = session.session.activeOrganizationId;
+        if (!activeOrganizationId || agentName !== activeOrganizationId) {
           return new Response("Forbidden", { status: 403 });
         }
         return undefined;
