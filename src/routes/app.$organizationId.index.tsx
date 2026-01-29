@@ -9,11 +9,11 @@ import { useMutation } from "@tanstack/react-query";
 import {
   createFileRoute,
   useHydrated,
+  useParams,
   useRouter,
 } from "@tanstack/react-router";
 import { createServerFn, useServerFn } from "@tanstack/react-start";
 import { getRequest } from "@tanstack/react-start/server";
-import { getAgentByName } from "agents";
 import { useAgent } from "agents/react";
 import * as z from "zod";
 import {
@@ -65,23 +65,18 @@ const getLoaderData = createServerFn({ method: "GET" })
   .handler(
     async ({
       data: { organizationId },
-      context: { authService, repository, env },
+      context: { authService, repository },
     }) => {
       const request = getRequest();
       const session = await authService.api.getSession({
         headers: request.headers,
       });
       invariant(session, "Missing session");
-      const agentName = session.session.activeOrganizationId;
-      invariant(agentName, "Missing active organization");
-      const { ok, now, agentId } = await (
-        await getAgentByName(env.USER_AGENT, agentName)
-      ).ping();
       const dashboardData = await repository.getAppDashboardData({
         userEmail: session.user.email,
         organizationId,
       });
-      return { ...dashboardData, agent: { ok, now, agentId, agentName } };
+      return dashboardData;
     },
   );
 
@@ -106,13 +101,13 @@ const rejectInvitation = createServerFn({ method: "POST" })
   });
 
 function RouteComponent() {
-  const { userInvitations, memberCount, pendingInvitationCount, agent } =
+  const { userInvitations, memberCount, pendingInvitationCount } =
     Route.useLoaderData();
+  const { organizationId } = useParams({ from: "/app/$organizationId/" });
   const isHydrated = useHydrated();
-  const agentName = agent.agentName;
   const chatAgent = useAgent<UserAgent, unknown>({
     agent: "user-agent",
-    name: agentName,
+    name: organizationId,
   });
   const {
     messages: rawMessages,
@@ -188,12 +183,10 @@ function RouteComponent() {
 
         <Card>
           <CardHeader>
-            <CardTitle>Agent Ping</CardTitle>
-            <CardDescription>User agent response</CardDescription>
+            <CardTitle>Agent RPC</CardTitle>
+            <CardDescription>User agent RPC methods</CardDescription>
           </CardHeader>
           <CardContent>
-            <div className="text-muted-foreground text-sm">{agent.now}</div>
-            <div className="text-sm">{agent.agentId}</div>
             <div className="text-muted-foreground text-sm">
               {feeFiMutation.data ?? "No response yet"}
             </div>
