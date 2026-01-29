@@ -49,6 +49,7 @@ import {
   ItemDescription,
   ItemTitle,
 } from "@/components/ui/item";
+import { UserAgent } from "@/user-agent";
 
 const organizationIdSchema = z.object({ organizationId: z.string() });
 
@@ -109,16 +110,7 @@ function RouteComponent() {
     Route.useLoaderData();
   const isHydrated = useHydrated();
   const agentName = agent.agentName;
-  const feeFiMutation = useMutation<string>({
-    mutationFn: () => chatAgent.call<string>("feeFi"),
-  });
-  const feeFi1Mutation = useMutation<string>({
-    mutationFn: () => chatAgent.call<string>("feeFi1"),
-  });
-  const feeFi2Mutation = useMutation<string>({
-    mutationFn: () => chatAgent.call<string>("feeFi2"),
-  });
-  const chatAgent = useAgent({
+  const chatAgent = useAgent<UserAgent, unknown>({
     agent: "user-agent",
     name: agentName,
   });
@@ -135,8 +127,18 @@ function RouteComponent() {
     message: UIMessage,
   ) => Promise<unknown>;
   const safeStatus = status as PromptInputSubmitProps["status"];
+
+  const feeFiMutation = useMutation<string>({
+    mutationFn: () => chatAgent.stub.feeFi(),
+  });
+  const feeFi1Mutation = useMutation<string>({
+    mutationFn: () => chatAgent.stub.feeFi1(),
+  });
+  const feeFi2Mutation = useMutation<string>({
+    mutationFn: () => chatAgent.stub.feeFi2(),
+  });
   const bangMutation = useMutation<string>({
-    mutationFn: () => chatAgent.call<string>("bang"),
+    mutationFn: () => chatAgent.stub.bang(),
   });
 
   return (
