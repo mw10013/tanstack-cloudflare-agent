@@ -1,8 +1,4 @@
-import type {
-  PromptInputMessage,
-  PromptInputSubmitProps,
-} from "@/components/ai-elements/prompt-input";
-import type { UIMessage } from "ai";
+import type { PromptInputMessage } from "@/components/ai-elements/prompt-input";
 import { useAgentChat } from "@cloudflare/ai-chat/react";
 import { invariant } from "@epic-web/invariant";
 import { useMutation } from "@tanstack/react-query";
@@ -109,19 +105,7 @@ function RouteComponent() {
     agent: "user-agent",
     name: organizationId,
   });
-  const {
-    messages: rawMessages,
-    sendMessage,
-    status,
-  } = useAgentChat({
-    agent,
-    getInitialMessages: () => Promise.resolve([]),
-  });
-  const safeChatMessages = rawMessages as UIMessage[];
-  const safeSendMessage = sendMessage as unknown as (
-    message: UIMessage,
-  ) => Promise<unknown>;
-  const safeStatus = status as PromptInputSubmitProps["status"];
+  const { messages, sendMessage, status } = useAgentChat({ agent });
 
   const feeFiMutation = useMutation<string>({
     mutationFn: () => agent.stub.feeFi(),
@@ -258,7 +242,7 @@ function RouteComponent() {
           <div className="h-96 rounded-md border">
             <Conversation className="h-full">
               <ConversationContent>
-                {safeChatMessages.map((message) => (
+                {messages.map((message) => (
                   <Message from={message.role} key={message.id}>
                     <MessageContent>
                       {message.parts.map((part, index) =>
@@ -274,7 +258,7 @@ function RouteComponent() {
                   </Message>
                 ))}
 
-                {safeChatMessages.length === 0 && (
+                {messages.length === 0 && (
                   <ConversationEmptyState
                     description="Send a message to start the conversation."
                     title="No messages"
@@ -289,8 +273,7 @@ function RouteComponent() {
               if (!text.trim()) {
                 return;
               }
-              await safeSendMessage({
-                id: crypto.randomUUID(),
+              await sendMessage({
                 role: "user",
                 parts: [{ type: "text", text }],
               });
@@ -300,7 +283,7 @@ function RouteComponent() {
               <PromptInputTextarea placeholder="Ask your agent..." />
             </PromptInputBody>
             <PromptInputFooter className="justify-end">
-              <PromptInputSubmit status={safeStatus} />
+              <PromptInputSubmit status={status} />
             </PromptInputFooter>
           </PromptInput>
         </CardContent>
