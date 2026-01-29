@@ -105,7 +105,7 @@ function RouteComponent() {
     Route.useLoaderData();
   const { organizationId } = useParams({ from: "/app/$organizationId/" });
   const isHydrated = useHydrated();
-  const chatAgent = useAgent<UserAgent, unknown>({
+  const agent = useAgent<UserAgent, unknown>({
     agent: "user-agent",
     name: organizationId,
   });
@@ -114,7 +114,7 @@ function RouteComponent() {
     sendMessage,
     status,
   } = useAgentChat({
-    agent: chatAgent,
+    agent: agent,
     getInitialMessages: () => Promise.resolve([]),
   });
   const safeChatMessages = rawMessages as UIMessage[];
@@ -124,16 +124,16 @@ function RouteComponent() {
   const safeStatus = status as PromptInputSubmitProps["status"];
 
   const feeFiMutation = useMutation<string>({
-    mutationFn: () => chatAgent.stub.feeFi(),
+    mutationFn: () => agent.stub.feeFi(),
   });
   const feeFi1Mutation = useMutation<string>({
-    mutationFn: () => chatAgent.stub.feeFi1(),
+    mutationFn: () => agent.stub.feeFi1(),
   });
   const feeFi2Mutation = useMutation<string>({
-    mutationFn: () => chatAgent.stub.feeFi2(),
+    mutationFn: () => agent.stub.feeFi2(),
   });
   const bangMutation = useMutation<string>({
-    mutationFn: () => chatAgent.stub.bang(),
+    mutationFn: () => agent.stub.bang(),
   });
 
   return (
