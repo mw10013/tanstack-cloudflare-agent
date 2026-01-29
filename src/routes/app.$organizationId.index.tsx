@@ -94,48 +94,6 @@ const acceptInvitation = createServerFn({ method: "POST" })
     });
   });
 
-const feeFi = createServerFn({ method: "POST" }).handler(
-  async ({ context: { authService, env } }): Promise<string> => {
-    const request = getRequest();
-    const session = await authService.api.getSession({
-      headers: request.headers,
-    });
-    invariant(session, "Missing session");
-    const agentName = session.session.activeOrganizationId;
-    invariant(agentName, "Missing active organization");
-    const agent = await getAgentByName(env.USER_AGENT, agentName);
-    return await agent.feeFi();
-  },
-);
-
-const feeFi1 = createServerFn({ method: "POST" }).handler(
-  async ({ context: { authService, env } }): Promise<string> => {
-    const request = getRequest();
-    const session = await authService.api.getSession({
-      headers: request.headers,
-    });
-    invariant(session, "Missing session");
-    const agentName = session.session.activeOrganizationId;
-    invariant(agentName, "Missing active organization");
-    const agent = await getAgentByName(env.USER_AGENT, agentName);
-    return await agent.feeFi1();
-  },
-);
-
-const feeFi2 = createServerFn({ method: "POST" }).handler(
-  async ({ context: { authService, env } }): Promise<string> => {
-    const request = getRequest();
-    const session = await authService.api.getSession({
-      headers: request.headers,
-    });
-    invariant(session, "Missing session");
-    const agentName = session.session.activeOrganizationId;
-    invariant(agentName, "Missing active organization");
-    const agent = await getAgentByName(env.USER_AGENT, agentName);
-    return await agent.feeFi2();
-  },
-);
-
 const rejectInvitation = createServerFn({ method: "POST" })
   .inputValidator(invitationIdSchema)
   .handler(async ({ data: { invitationId }, context: { authService } }) => {
@@ -151,17 +109,14 @@ function RouteComponent() {
     Route.useLoaderData();
   const isHydrated = useHydrated();
   const agentName = agent.agentName;
-  const feeFiServerFn = useServerFn(feeFi);
-  const feeFi1ServerFn = useServerFn(feeFi1);
-  const feeFi2ServerFn = useServerFn(feeFi2);
   const feeFiMutation = useMutation<string>({
-    mutationFn: () => feeFiServerFn(),
+    mutationFn: () => chatAgent.call<string>("feeFi"),
   });
   const feeFi1Mutation = useMutation<string>({
-    mutationFn: () => feeFi1ServerFn(),
+    mutationFn: () => chatAgent.call<string>("feeFi1"),
   });
   const feeFi2Mutation = useMutation<string>({
-    mutationFn: () => feeFi2ServerFn(),
+    mutationFn: () => chatAgent.call<string>("feeFi2"),
   });
   const chatAgent = useAgent({
     agent: "user-agent",

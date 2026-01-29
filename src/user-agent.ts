@@ -45,6 +45,7 @@ export class UserAgent extends AIChatAgent<Env> {
     return result.toUIMessageStreamResponse();
   }
 
+  @callable()
   async feeFi(): Promise<string> {
     const ai = this.env.AI;
     const response = await ai.run(
@@ -62,6 +63,7 @@ export class UserAgent extends AIChatAgent<Env> {
     return output && output.trim().length > 0 ? output : "No response";
   }
 
+  @callable()
   async feeFi1(): Promise<string> {
     const gatewayUrl = await this.env.AI.gateway(this.env.AI_GATEWAY_ID).getUrl(
       "workers-ai",
@@ -80,6 +82,7 @@ export class UserAgent extends AIChatAgent<Env> {
     return text && text.trim().length > 0 ? text : "No response";
   }
 
+  @callable()
   async feeFi2(): Promise<string> {
     const workersai = createWorkersAI({
       binding: this.env.AI,
