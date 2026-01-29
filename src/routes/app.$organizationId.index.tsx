@@ -114,7 +114,7 @@ function RouteComponent() {
     sendMessage,
     status,
   } = useAgentChat({
-    agent: agent,
+    agent,
     getInitialMessages: () => Promise.resolve([]),
   });
   const safeChatMessages = rawMessages as UIMessage[];
