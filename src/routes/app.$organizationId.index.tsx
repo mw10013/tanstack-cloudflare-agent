@@ -1,4 +1,3 @@
-import type { PromptInputMessage } from "@/components/ai-elements/prompt-input";
 import { useAgentChat } from "@cloudflare/ai-chat/react";
 import { invariant } from "@epic-web/invariant";
 import { useMutation } from "@tanstack/react-query";
@@ -269,7 +268,7 @@ function RouteComponent() {
             </Conversation>
           </div>
           <PromptInput
-            onSubmit={async ({ text }: PromptInputMessage) => {
+            onSubmit={async ({ text }) => {
               if (!text.trim()) {
                 return;
               }
