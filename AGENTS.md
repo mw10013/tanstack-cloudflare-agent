@@ -78,6 +78,28 @@ import * as z from "zod";
 - **beforeLoad vs loader**: Use `beforeLoad` for route guards (auth, authorization) - returns merge into context. Use `loader` for data fetching - route-specific, parallel execution.
 - **Execution order**: `beforeLoad` runs sequentially parent→child. `loader` runs in parallel across all active routes after beforeLoad completes.
 
+## LLM Tools
+
+### Playwright CLI (https://github.com/microsoft/playwright-cli)
+
+```bash
+playwright-cli open <url>               # open url
+playwright-cli type <text>              # type text into editable element
+playwright-cli click <ref>              # click element by ref
+playwright-cli fill <ref> <text>        # fill text into element
+playwright-cli screenshot               # capture screenshot
+playwright-cli snapshot                 # capture page snapshot to obtain element ref
+playwright-cli eval <func>              # evaluate javascript on page
+```
+
+**Sessions (persistent browser profiles):**
+
+```bash
+playwright-cli --session=<name> open <url>  # use specific session
+playwright-cli session-list                 # list all sessions
+playwright-cli session-stop <name>          # stop session
+```
+
 ## Do Not Edit
 
 The following are auto-generated or externally managed:

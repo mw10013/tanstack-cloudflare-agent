@@ -20,7 +20,7 @@
 - TanStack: Start, Router, Query, Form
 - Cloudflare: D1 with read replication, KV, Cron, Rate Limiting, Web Analytics
 - Better Auth: Magic Link, Admin, Organization, Stripe, D1 Database Adapter
-- UI: Shadcn on Base UI 
+- UI: Shadcn on Base UI
 - Testing: Vitest, Playwright
 
 ## Template Functionality
@@ -65,7 +65,7 @@
   - IP-based rate limiting for authentication endpoints using Cloudflare Rate Limiting
   - Server-side route protection and authorization
   - Secure session handling with database storage
-  
+
 ## Quick Start
 
 ### Stripe
@@ -145,6 +145,12 @@ pnpm dlx shadcn@latest add --overwrite accordion alert-dialog alert aspect-ratio
 pnpm dlx shadcn@latest add https://ai-sdk.dev/elements/api/registry/all.json
 ```
 
+## Llms
+
+```
+pnpm add -g @playwright/cli@latest
+```
+
 ## Credit
 
 Homepage / Pricing design by [dev-xo](https://github.com/dev-xo). See his [remix-saas](https://github.com/dev-xo/remix-saas) for a production-ready saas template for remix.
@@ -152,4 +158,3 @@ Homepage / Pricing design by [dev-xo](https://github.com/dev-xo). See his [remix
 ## License
 
 Licensed under the [MIT License](https://github.com/mw10013/tanstack-cloudflare-agent/blob/main/LICENSE).
-
