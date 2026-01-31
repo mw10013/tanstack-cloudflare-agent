@@ -92,6 +92,8 @@ playwright-cli snapshot                 # capture page snapshot to obtain elemen
 playwright-cli eval <func>              # evaluate javascript on page
 ```
 
+**Workflow:** Run `snapshot` to get element refs (e.g., `e31`), then use refs in `click`/`fill` commands.
+
 **Sessions (persistent browser profiles):**
 
 ```bash
