@@ -15,6 +15,7 @@ refs
 *.tsbuildinfo
 playwright-report/
 test-results/
+.playwright-cli/
 todo.md
 
 .dev.vars*
