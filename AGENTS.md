@@ -88,60 +88,29 @@ import * as z from "zod";
 - **beforeLoad vs loader**: Use `beforeLoad` for route guards (auth, authorization) - returns merge into context. Use `loader` for data fetching - route-specific, parallel execution.
 - **Execution order**: `beforeLoad` runs sequentially parent→child. `loader` runs in parallel across all active routes after beforeLoad completes.
 
-## Playwright CLI Sessions
+## Playwright CLI
 
-### Session Naming Convention
+**Default to headed mode** (visible browser) unless the user explicitly requests headless. Use `--headed` flag.
 
-Use port-prefixed session names to ensure unique sessions across different LLM instances:
+**Session naming:** `{port}-{purpose}` (e.g., `${PORT}-localdev`, `${PORT}-testing`)
 
-**Format:** `{port}-{purpose}`
-
-**Examples:**
-
-- `${PORT}-localdev` - Local development on port `${PORT}`
-- `${PORT}-testing` - Testing on port `${PORT}`
-
-Replace `${PORT}` with the actual port number from Port Configuration section above.
-
-### Session Commands
+**Basic usage:**
 
 ```bash
-# Open local dev server with session
-playwright-cli --session="${PORT}-localdev" open "http://localhost:${PORT}"
+# Open with headed browser (default for LLM use)
+playwright-cli --headed --session="${PORT}-localdev" open "http://localhost:${PORT}"
 
-# Other playwright-cli commands with session
+# Subsequent commands use the same session
 playwright-cli --session="${PORT}-localdev" type "Hello World"
 playwright-cli --session="${PORT}-localdev" click "button.submit"
 ```
 
-### Session Management
+**Session management:**
 
 ```bash
-# List all sessions
-playwright-cli session-list
-
-# Stop session for port 3000
-playwright-cli session-stop 3000-localdev
-
-# Delete session data
-playwright-cli session-delete 3000-localdev
-```
-
-### Benefits
-
-- **Port-scoped**: Sessions are isolated by port number
-- **Purpose-agnostic**: Works across different LLM instances
-- **Predictable**: Easy to clean up sessions for specific ports
-- **Simple**: No need for LLM-specific identifiers
-
-### Local Dev Server
-
-The local dev server port is configured in the Port Configuration section above.
-
-**Example usage:**
-
-```bash
-playwright-cli --session=3000-localdev open "http://localhost:${PORT}"
+playwright-cli session-list              # List all sessions
+playwright-cli session-stop "${PORT}-localdev"   # Stop specific session
+playwright-cli session-delete "${PORT}-localdev" # Delete session data
 ```
 
 ## Do Not Edit
