@@ -108,9 +108,8 @@ playwright-cli --session="${PORT}-localdev" click "button.submit"
 **Session management:**
 
 ```bash
-playwright-cli session-list              # List all sessions
-playwright-cli session-stop "${PORT}-localdev"   # Stop specific session
-playwright-cli session-delete "${PORT}-localdev" # Delete session data
+playwright-cli session-list
+playwright-cli session-delete "${PORT}-localdev"
 ```
 
 ## Do Not Edit
