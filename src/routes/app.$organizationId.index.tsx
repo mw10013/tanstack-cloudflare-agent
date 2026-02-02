@@ -1,34 +1,13 @@
-import { useAgentChat } from "@cloudflare/ai-chat/react";
 import { invariant } from "@epic-web/invariant";
 import { useMutation } from "@tanstack/react-query";
 import {
   createFileRoute,
   useHydrated,
-  useParams,
   useRouter,
 } from "@tanstack/react-router";
 import { createServerFn, useServerFn } from "@tanstack/react-start";
 import { getRequest } from "@tanstack/react-start/server";
-import { useAgent } from "agents/react";
 import * as z from "zod";
-import {
-  Conversation,
-  ConversationContent,
-  ConversationEmptyState,
-  ConversationScrollButton,
-} from "@/components/ai-elements/conversation";
-import {
-  Message,
-  MessageContent,
-  MessageResponse,
-} from "@/components/ai-elements/message";
-import {
-  PromptInput,
-  PromptInputBody,
-  PromptInputFooter,
-  PromptInputSubmit,
-  PromptInputTextarea,
-} from "@/components/ai-elements/prompt-input";
 import { Button } from "@/components/ui/button";
 import {
   Card,
@@ -44,7 +23,6 @@ import {
   ItemDescription,
   ItemTitle,
 } from "@/components/ui/item";
-import { OrganizationAgent } from "@/organization-agent";
 
 const organizationIdSchema = z.object({ organizationId: z.string() });
 
@@ -98,26 +76,6 @@ const rejectInvitation = createServerFn({ method: "POST" })
 function RouteComponent() {
   const { userInvitations, memberCount, pendingInvitationCount } =
     Route.useLoaderData();
-  const { organizationId } = useParams({ from: "/app/$organizationId/" });
-  const isHydrated = useHydrated();
-  const agent = useAgent<OrganizationAgent, unknown>({
-    agent: "organization-agent",
-    name: organizationId,
-  });
-  const { messages, sendMessage, status } = useAgentChat({ agent });
-
-  const feeFiMutation = useMutation<string>({
-    mutationFn: () => agent.stub.feeFi(),
-  });
-  const feeFi1Mutation = useMutation<string>({
-    mutationFn: () => agent.stub.feeFi1(),
-  });
-  const feeFi2Mutation = useMutation<string>({
-    mutationFn: () => agent.stub.feeFi2(),
-  });
-  const bangMutation = useMutation<string>({
-    mutationFn: () => agent.stub.bang(),
-  });
 
   return (
     <div className="flex flex-col gap-6 p-6">
@@ -163,130 +121,7 @@ function RouteComponent() {
             <div className="text-2xl font-bold">{pendingInvitationCount}</div>
           </CardContent>
         </Card>
-
-        <Card>
-          <CardHeader>
-            <CardTitle>Agent RPC</CardTitle>
-            <CardDescription>User agent RPC methods</CardDescription>
-          </CardHeader>
-          <CardContent>
-            <div className="text-muted-foreground text-sm">
-              {feeFiMutation.data ?? "No response yet"}
-            </div>
-            <div className="text-muted-foreground text-sm">
-              {feeFi1Mutation.data ?? "No response yet"}
-            </div>
-            <div className="text-muted-foreground text-sm">
-              {feeFi2Mutation.data ?? "No response yet"}
-            </div>
-            <div className="text-muted-foreground text-sm">
-              {bangMutation.data ?? "No response yet"}
-            </div>
-            <div className="flex flex-wrap gap-2">
-              <Button
-                type="button"
-                variant="outline"
-                size="sm"
-                disabled={!isHydrated || feeFiMutation.isPending}
-                onClick={() => {
-                  feeFiMutation.mutate();
-                }}
-              >
-                FeeFi
-              </Button>
-              <Button
-                type="button"
-                variant="outline"
-                size="sm"
-                disabled={!isHydrated || feeFi1Mutation.isPending}
-                onClick={() => {
-                  feeFi1Mutation.mutate();
-                }}
-              >
-                FeeFi1
-              </Button>
-              <Button
-                type="button"
-                variant="outline"
-                size="sm"
-                disabled={!isHydrated || feeFi2Mutation.isPending}
-                onClick={() => {
-                  feeFi2Mutation.mutate();
-                }}
-              >
-                FeeFi2
-              </Button>
-              <Button
-                type="button"
-                variant="outline"
-                size="sm"
-                disabled={!isHydrated || bangMutation.isPending}
-                onClick={() => {
-                  bangMutation.mutate();
-                }}
-              >
-                Bang
-              </Button>
-            </div>
-          </CardContent>
-        </Card>
       </div>
-
-      <Card>
-        <CardHeader>
-          <CardTitle>Agent Chat</CardTitle>
-          <CardDescription>Chat with your user agent</CardDescription>
-        </CardHeader>
-        <CardContent className="flex flex-col gap-4">
-          <div className="h-96 rounded-md border">
-            <Conversation className="h-full">
-              <ConversationContent>
-                {messages.map((message) => (
-                  <Message from={message.role} key={message.id}>
-                    <MessageContent>
-                      {message.parts.map((part, index) =>
-                        part.type === "text" ? (
-                          <MessageResponse
-                            key={`${message.id}-${String(index)}`}
-                          >
-                            {part.text}
-                          </MessageResponse>
-                        ) : null,
-                      )}
-                    </MessageContent>
-                  </Message>
-                ))}
-
-                {messages.length === 0 && (
-                  <ConversationEmptyState
-                    description="Send a message to start the conversation."
-                    title="No messages"
-                  />
-                )}
-              </ConversationContent>
-              <ConversationScrollButton />
-            </Conversation>
-          </div>
-          <PromptInput
-            onSubmit={async ({ text }) => {
-              if (!text.trim()) {
-                return;
-              }
-              await sendMessage({
-                role: "user",
-                parts: [{ type: "text", text }],
-              });
-            }}
-          >
-            <PromptInputBody>
-              <PromptInputTextarea placeholder="Ask your agent..." />
-            </PromptInputBody>
-            <PromptInputFooter className="justify-end">
-              <PromptInputSubmit status={status} />
-            </PromptInputFooter>
-          </PromptInput>
-        </CardContent>
-      </Card>
     </div>
   );
 }
