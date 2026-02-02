@@ -14,7 +14,7 @@ export const extractAgentName = (request: Request) => {
   return segments[2] ?? null;
 };
 
-export class UserAgent extends AIChatAgent<Env> {
+export class OrganizationAgent extends AIChatAgent<Env> {
   ping() {
     return {
       ok: true,

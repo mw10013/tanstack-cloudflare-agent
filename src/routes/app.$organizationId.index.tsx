@@ -44,7 +44,7 @@ import {
   ItemDescription,
   ItemTitle,
 } from "@/components/ui/item";
-import { UserAgent } from "@/user-agent";
+import { OrganizationAgent } from "@/organization-agent";
 
 const organizationIdSchema = z.object({ organizationId: z.string() });
 
@@ -100,8 +100,8 @@ function RouteComponent() {
     Route.useLoaderData();
   const { organizationId } = useParams({ from: "/app/$organizationId/" });
   const isHydrated = useHydrated();
-  const agent = useAgent<UserAgent, unknown>({
-    agent: "user-agent",
+  const agent = useAgent<OrganizationAgent, unknown>({
+    agent: "organization-agent",
     name: organizationId,
   });
   const { messages, sendMessage, status } = useAgentChat({ agent });

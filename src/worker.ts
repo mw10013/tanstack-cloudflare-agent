@@ -7,9 +7,9 @@ import { createAuthService } from "@/lib/auth-service";
 import { createD1SessionService } from "@/lib/d1-session-service";
 import { createRepository } from "@/lib/repository";
 import { createStripeService } from "@/lib/stripe-service";
-import { extractAgentName } from "./user-agent";
+import { extractAgentName } from "./organization-agent";
 
-export { UserAgent } from "./user-agent";
+export { OrganizationAgent } from "./organization-agent";
 
 export interface ServerContext {
   env: Env;
@@ -29,8 +29,8 @@ declare module "@tanstack/react-start" {
 
 export default {
   async fetch(request, env, _ctx) {
-    console.log(`fetch: ${request.url}`);
     const url = new URL(request.url);
+    console.log(`[${new Date().toISOString()}] fetch: ${request.url}`);
     const isMagicLinkRequest =
       (url.pathname === "/login" && request.method === "POST") ||
       url.pathname === "/api/auth/magic-link/verify";

@@ -25,15 +25,15 @@
   "durable_objects": {
     "bindings": [
       {
-        "name": "USER_AGENT",
-        "class_name": "UserAgent"
+        "name": "ORGANIZATION_AGENT",
+        "class_name": "OrganizationAgent"
       }
     ]
   },
   "migrations": [
     {
       "tag": "v1",
-      "new_sqlite_classes": ["UserAgent"]
+      "new_sqlite_classes": ["OrganizationAgent"]
     }
   ],
   "d1_databases": [
@@ -102,15 +102,15 @@
       "durable_objects": {
         "bindings": [
           {
-            "name": "USER_AGENT",
-            "class_name": "UserAgent"
+            "name": "ORGANIZATION_AGENT",
+            "class_name": "OrganizationAgent"
           }
         ]
       },
       "migrations": [
         {
           "tag": "v1",
-          "new_sqlite_classes": ["UserAgent"]
+          "new_sqlite_classes": ["OrganizationAgent"]
         }
       ],
       "ai": {
