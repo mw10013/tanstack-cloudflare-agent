@@ -16,6 +16,7 @@ refs
 playwright-report/
 test-results/
 .playwright-cli/
+logs/
 todo.md
 
 .dev.vars*
