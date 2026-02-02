@@ -11,6 +11,16 @@
 - `tanstack-cloudflare-agent` is a TanStack Start and Cloudflare Workers application with shadcn/ui components (Base UI variant), TypeScript, Tailwind CSS v4.
 - Route modules are in `src/routes/` and use file route conventions.
 
+## Port Configuration
+
+The local dev server (`pnpm dev`) runs on port: `!source .env && echo $PORT`
+
+Use `${PORT}` in commands that reference the local dev server, for example:
+
+```bash
+playwright-cli --session=3000-localdev open "http://localhost:${PORT}"
+```
+
 ## Refs
 
 Downloaded source code of libraries are in `refs/` for reference.
@@ -29,7 +39,7 @@ Downloaded source code of libraries are in `refs/` for reference.
 ## Commands
 
 ```bash
-pnpm dev                # Start dev server on port 3000
+pnpm dev                # Start dev server (see Port Configuration above)
 pnpm typecheck          # TypeScript type checking (includes wrangler types generation)
 pnpm lint               # Run ESLint
 pnpm test               # Run all tests with Vitest. We only have d1-adapter tests so not that useful yet.
@@ -78,28 +88,64 @@ import * as z from "zod";
 - **beforeLoad vs loader**: Use `beforeLoad` for route guards (auth, authorization) - returns merge into context. Use `loader` for data fetching - route-specific, parallel execution.
 - **Execution order**: `beforeLoad` runs sequentially parent→child. `loader` runs in parallel across all active routes after beforeLoad completes.
 
-## LLM Tools
+## Playwright CLI Sessions
 
-### Playwright CLI (https://github.com/microsoft/playwright-cli)
+### Session Naming Convention
+
+Use port-prefixed session names to ensure unique sessions across different LLM instances:
+
+**Format:** `{port}-{purpose}`
+
+**Examples:**
+
+- `${PORT}-localdev` - Local development on port `${PORT}`
+- `${PORT}-testing` - Testing on port `${PORT}`
+- `${PORT}-localdev` - Local development on port 3001
+
+Replace `${PORT}` with the actual port number from Port Configuration section above.
+
+### Session Commands
 
 ```bash
-playwright-cli open <url>               # open url
-playwright-cli type <text>              # type text into editable element
-playwright-cli click <ref>              # click element by ref
-playwright-cli fill <ref> <text>        # fill text into element
-playwright-cli screenshot               # capture screenshot
-playwright-cli snapshot                 # capture page snapshot to obtain element ref
-playwright-cli eval <func>              # evaluate javascript on page
+# Open local dev server with session
+playwright-cli --session=${PORT}-localdev open "http://localhost:${PORT}"
+
+# Other playwright-cli commands with session
+playwright-cli --session=${PORT}-localdev type "Hello World"
+playwright-cli --session=${PORT}-localdev click "button.submit"
 ```
 
-**Workflow:** Run `snapshot` to get element refs (e.g., `e31`), then use refs in `click`/`fill` commands.
-
-**Sessions (persistent browser profiles):**
+### Session Management
 
 ```bash
-playwright-cli --session=<name> open <url>  # use specific session
-playwright-cli session-list                 # list all sessions
-playwright-cli session-stop <name>          # stop session
+# List all sessions
+playwright-cli session-list
+
+# Stop session for port 3000
+playwright-cli session-stop 3000-localdev
+
+# Delete session data
+playwright-cli session-delete 3000-localdev
+
+# Stop all sessions for port 3000
+playwright-cli session-stop-all | grep 3000
+```
+
+### Benefits
+
+- **Port-scoped**: Sessions are isolated by port number
+- **Purpose-agnostic**: Works across different LLM instances
+- **Predictable**: Easy to clean up sessions for specific ports
+- **Simple**: No need for LLM-specific identifiers
+
+### Local Dev Server
+
+The local dev server port is configured in the Port Configuration section above.
+
+**Example usage:**
+
+```bash
+playwright-cli --session=3000-localdev open "http://localhost:${PORT}"
 ```
 
 ## Do Not Edit
