@@ -49,6 +49,10 @@ npm run test:e2e --     # Playwright via npm (uses pnpm exec in script); pass ar
 - Do not run `pnpm test:integration` since its tests are broken.
 - Run typecheck and lint after generating code.
 
+## Server Log Monitoring
+
+`logs/server.log` is a live, continuously growing log of dev server output. Use `tail` to check for build errors and runtime issues.
+
 ## TypeScript Guidelines
 
 - Always follow functional programming principles
