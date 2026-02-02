@@ -18,7 +18,7 @@ The local dev server (`pnpm dev`) runs on port: `!source .env && echo $PORT`
 Use `${PORT}` in commands that reference the local dev server, for example:
 
 ```bash
-playwright-cli --session=3000-localdev open "http://localhost:${PORT}"
+playwright-cli --session="${PORT}-localdev" open "http://localhost:${PORT}"
 ```
 
 ## Refs
@@ -100,7 +100,6 @@ Use port-prefixed session names to ensure unique sessions across different LLM i
 
 - `${PORT}-localdev` - Local development on port `${PORT}`
 - `${PORT}-testing` - Testing on port `${PORT}`
-- `${PORT}-localdev` - Local development on port 3001
 
 Replace `${PORT}` with the actual port number from Port Configuration section above.
 
@@ -108,11 +107,11 @@ Replace `${PORT}` with the actual port number from Port Configuration section ab
 
 ```bash
 # Open local dev server with session
-playwright-cli --session=${PORT}-localdev open "http://localhost:${PORT}"
+playwright-cli --session="${PORT}-localdev" open "http://localhost:${PORT}"
 
 # Other playwright-cli commands with session
-playwright-cli --session=${PORT}-localdev type "Hello World"
-playwright-cli --session=${PORT}-localdev click "button.submit"
+playwright-cli --session="${PORT}-localdev" type "Hello World"
+playwright-cli --session="${PORT}-localdev" click "button.submit"
 ```
 
 ### Session Management
@@ -126,9 +125,6 @@ playwright-cli session-stop 3000-localdev
 
 # Delete session data
 playwright-cli session-delete 3000-localdev
-
-# Stop all sessions for port 3000
-playwright-cli session-stop-all | grep 3000
 ```
 
 ### Benefits
