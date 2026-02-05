@@ -13,7 +13,7 @@
 
 ## Port Configuration
 
-The local dev server (`pnpm dev`) runs on port: `!source .env && echo $PORT`
+The local dev server (`pnpm dev`) runs on port: `pnpm port`
 
 Use `${PORT}` in commands that reference the local dev server, for example:
 

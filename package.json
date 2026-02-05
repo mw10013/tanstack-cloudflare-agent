@@ -24,6 +24,7 @@
     "lint": "eslint .",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
+    "port": "source .env && echo $PORT",
     "tail:PRODUCTION": "wrangler tail tca",
     "d1:migrate:list": "wrangler d1 migrations list d1-local --local",
     "d1:migrate:apply": "wrangler d1 migrations apply d1-local --local",
