@@ -13,12 +13,16 @@
 
 ## Port Configuration
 
-The local dev server (`pnpm dev`) runs on port: `pnpm port`
-
-Use `${PORT}` in commands that reference the local dev server, for example:
+Get the local dev server port by running:
 
 ```bash
-playwright-cli --session="${PORT}-localdev" open "http://localhost:${PORT}"
+pnpm port
+```
+
+Use this port in commands via command substitution:
+
+```bash
+playwright-cli --session="$(pnpm port)-localdev" open "http://localhost:$(pnpm port)"
 ```
 
 ## Refs
@@ -96,24 +100,24 @@ import * as z from "zod";
 
 **Default to headed mode** (visible browser) unless the user explicitly requests headless. Use `--headed` flag.
 
-**Session naming:** `{port}-{purpose}` (e.g., `${PORT}-localdev`, `${PORT}-testing`)
+**Session naming:** `{port}-{purpose}` (e.g., `$(pnpm port)-localdev`, `$(pnpm port)-testing`)
 
 **Basic usage:**
 
 ```bash
 # Open with headed browser (default for LLM use)
-playwright-cli --headed --session="${PORT}-localdev" open "http://localhost:${PORT}"
+playwright-cli --headed --session="$(pnpm port)-localdev" open "http://localhost:$(pnpm port)"
 
 # Subsequent commands use the same session
-playwright-cli --session="${PORT}-localdev" type "Hello World"
-playwright-cli --session="${PORT}-localdev" click "button.submit"
+playwright-cli --session="$(pnpm port)-localdev" type "Hello World"
+playwright-cli --session="$(pnpm port)-localdev" click "button.submit"
 ```
 
 **Session management:**
 
 ```bash
 playwright-cli session-list
-playwright-cli session-delete "${PORT}-localdev"
+playwright-cli session-delete "$(pnpm port)-localdev"
 ```
 
 ## Do Not Edit
