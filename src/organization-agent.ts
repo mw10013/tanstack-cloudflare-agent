@@ -34,7 +34,7 @@ export class OrganizationAgent extends AIChatAgent<Env> {
       gateway: {
         id: this.env.AI_GATEWAY_ID,
         skipCache: false,
-        cacheTtl: 3360,
+        cacheTtl: 7 * 24 * 60 * 60,
       },
     });
     const result = streamText({
@@ -55,7 +55,7 @@ export class OrganizationAgent extends AIChatAgent<Env> {
         gateway: {
           id: this.env.AI_GATEWAY_ID,
           skipCache: false,
-          cacheTtl: 3360,
+          cacheTtl: 7 * 24 * 60 * 60,
         },
       },
     );
@@ -89,7 +89,7 @@ export class OrganizationAgent extends AIChatAgent<Env> {
       gateway: {
         id: this.env.AI_GATEWAY_ID,
         skipCache: false,
-        cacheTtl: 3360,
+        cacheTtl: 7 * 24 * 60 * 60,
       },
     });
     const { text } = await generateText({
