@@ -113,6 +113,7 @@
     "@eslint/js": "9.39.2",
     "@fontsource-variable/inter": "5.2.8",
     "@ianvs/prettier-plugin-sort-imports": "4.7.0",
+    "@opencode-ai/plugin": "1.1.51",
     "@playwright/test": "1.57.0",
     "@tanstack/devtools-vite": "0.4.1",
     "@tanstack/eslint-plugin-query": "5.91.3",

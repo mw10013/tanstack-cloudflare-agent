@@ -12,6 +12,7 @@ export default defineConfig(
     "dist/",
     ".wrangler/",
     "worker-configuration.d.ts",
+    ".opencode/",
     "refs/",
     "playwright-report/",
     "test-results/",
