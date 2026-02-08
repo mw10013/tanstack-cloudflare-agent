@@ -2,7 +2,7 @@ import type {
   ApprovalRequestInfo,
   OrganizationAgent,
 } from "@/organization-agent";
-import * as React from "react";
+import { useForm } from "@tanstack/react-form";
 import { useMutation } from "@tanstack/react-query";
 import {
   createFileRoute,
@@ -11,7 +11,9 @@ import {
 } from "@tanstack/react-router";
 import { createServerFn, useServerFn } from "@tanstack/react-start";
 import { useAgent } from "agents/react";
-import { Check, Play, X } from "lucide-react";
+import { AlertCircle, Check, Play, X } from "lucide-react";
+import * as z from "zod";
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -21,6 +23,12 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
+import {
+  Field,
+  FieldError,
+  FieldGroup,
+  FieldLabel,
+} from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
 import { Spinner } from "@/components/ui/spinner";
 
@@ -32,11 +40,14 @@ const getLoaderData = createServerFn({ method: "GET" })
     return { requests: await stub.listApprovalRequests() };
   });
 
+const requestApprovalSchema = z.object({
+  organizationId: z.string(),
+  title: z.string().trim().min(1, "Title is required"),
+  description: z.string().trim(),
+});
+
 const requestApprovalFn = createServerFn({ method: "POST" })
-  .inputValidator(
-    (data: { organizationId: string; title: string; description: string }) =>
-      data,
-  )
+  .inputValidator(requestApprovalSchema)
   .handler(
     async ({
       context: { env },
@@ -52,10 +63,13 @@ const requestApprovalFn = createServerFn({ method: "POST" })
     },
   );
 
+const workflowActionSchema = z.object({
+  organizationId: z.string(),
+  workflowId: z.string(),
+});
+
 const approveRequestFn = createServerFn({ method: "POST" })
-  .inputValidator(
-    (data: { organizationId: string; workflowId: string }) => data,
-  )
+  .inputValidator(workflowActionSchema)
   .handler(
     async ({ context: { env }, data: { organizationId, workflowId } }) => {
       const id = env.ORGANIZATION_AGENT.idFromName(organizationId);
@@ -65,9 +79,7 @@ const approveRequestFn = createServerFn({ method: "POST" })
   );
 
 const rejectRequestFn = createServerFn({ method: "POST" })
-  .inputValidator(
-    (data: { organizationId: string; workflowId: string }) => data,
-  )
+  .inputValidator(workflowActionSchema)
   .handler(
     async ({ context: { env }, data: { organizationId, workflowId } }) => {
       const id = env.ORGANIZATION_AGENT.idFromName(organizationId);
@@ -129,14 +141,11 @@ function RouteComponent() {
   const approveRequestServerFn = useServerFn(approveRequestFn);
   const rejectRequestServerFn = useServerFn(rejectRequestFn);
 
-  const requestMutation = useMutation<
-    ApprovalRequestInfo,
-    Error,
-    { title: string; description: string }
-  >({
-    mutationFn: ({ title, description }) =>
-      requestApprovalServerFn({ data: { organizationId, title, description } }),
+  const requestMutation = useMutation({
+    mutationFn: (data: z.input<typeof requestApprovalSchema>) =>
+      requestApprovalServerFn({ data }),
     onSuccess: () => {
+      form.reset();
       void router.invalidate();
     },
   });
@@ -157,17 +166,19 @@ function RouteComponent() {
     },
   });
 
-  const handleSubmit = (e: React.FormEvent<HTMLFormElement>) => {
-    e.preventDefault();
-    const form = e.currentTarget;
-    const formData = new FormData(form);
-    const title = (formData.get("title") as string | null)?.trim() ?? "";
-    const description =
-      (formData.get("description") as string | null)?.trim() ?? "";
-    if (!title) return;
-    requestMutation.mutate({ title, description });
-    form.reset();
-  };
+  const form = useForm({
+    defaultValues: {
+      organizationId,
+      title: "",
+      description: "",
+    },
+    validators: {
+      onSubmit: requestApprovalSchema,
+    },
+    onSubmit: ({ value }) => {
+      requestMutation.mutate(value);
+    },
+  });
 
   return (
     <div className="flex flex-col gap-6 p-6">
@@ -186,29 +197,98 @@ function RouteComponent() {
           </CardDescription>
         </CardHeader>
         <CardContent>
-          <form onSubmit={handleSubmit} className="flex gap-3">
-            <Input
-              name="title"
-              placeholder="Title"
-              required
-              disabled={!isHydrated || requestMutation.isPending}
-            />
-            <Input
-              name="description"
-              placeholder="Description"
-              disabled={!isHydrated || requestMutation.isPending}
-            />
-            <Button
-              type="submit"
-              disabled={!isHydrated || requestMutation.isPending}
-            >
-              {requestMutation.isPending ? (
-                <Spinner className="mr-2 h-4 w-4" />
-              ) : (
-                <Play className="mr-2 h-4 w-4" />
+          <form
+            onSubmit={(e) => {
+              e.preventDefault();
+              void form.handleSubmit();
+            }}
+          >
+            <FieldGroup>
+              {requestMutation.error && (
+                <Alert variant="destructive">
+                  <AlertCircle className="size-4" />
+                  <AlertTitle>Error</AlertTitle>
+                  <AlertDescription>
+                    {requestMutation.error.message}
+                  </AlertDescription>
+                </Alert>
               )}
-              Start
-            </Button>
+              <div className="flex gap-3">
+                <form.Field
+                  name="title"
+                  children={(field) => {
+                    const isInvalid = field.state.meta.errors.length > 0;
+                    return (
+                      <Field data-invalid={isInvalid} className="flex-1">
+                        <FieldLabel htmlFor={field.name}>Title</FieldLabel>
+                        <Input
+                          id={field.name}
+                          name={field.name}
+                          value={field.state.value}
+                          onBlur={field.handleBlur}
+                          onChange={(e) => {
+                            field.handleChange(e.target.value);
+                          }}
+                          placeholder="Title"
+                          aria-invalid={isInvalid}
+                          disabled={!isHydrated || requestMutation.isPending}
+                        />
+                        {isInvalid && (
+                          <FieldError errors={field.state.meta.errors} />
+                        )}
+                      </Field>
+                    );
+                  }}
+                />
+                <form.Field
+                  name="description"
+                  children={(field) => {
+                    const isInvalid = field.state.meta.errors.length > 0;
+                    return (
+                      <Field data-invalid={isInvalid} className="flex-1">
+                        <FieldLabel htmlFor={field.name}>
+                          Description
+                        </FieldLabel>
+                        <Input
+                          id={field.name}
+                          name={field.name}
+                          value={field.state.value}
+                          onBlur={field.handleBlur}
+                          onChange={(e) => {
+                            field.handleChange(e.target.value);
+                          }}
+                          placeholder="Description"
+                          aria-invalid={isInvalid}
+                          disabled={!isHydrated || requestMutation.isPending}
+                        />
+                        {isInvalid && (
+                          <FieldError errors={field.state.meta.errors} />
+                        )}
+                      </Field>
+                    );
+                  }}
+                />
+              </div>
+              <form.Subscribe
+                selector={(state) => state.canSubmit}
+                children={(canSubmit) => (
+                  <Button
+                    type="submit"
+                    disabled={
+                      !canSubmit || !isHydrated || requestMutation.isPending
+                    }
+                    className="self-end"
+                  >
+                    {requestMutation.isPending ? (
+                      <Spinner className="mr-2 h-4 w-4" />
+                    ) : (
+                      <Play className="mr-2 h-4 w-4" />
+                    )}
+                    Start
+                  </Button>
+                )}
+              />
+            </FieldGroup>
           </form>
         </CardContent>
       </Card>
