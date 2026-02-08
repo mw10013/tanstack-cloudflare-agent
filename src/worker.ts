@@ -9,7 +9,7 @@ import { createRepository } from "@/lib/repository";
 import { createStripeService } from "@/lib/stripe-service";
 import { extractAgentName } from "./organization-agent";
 
-export { OrganizationAgent } from "./organization-agent";
+export { OrganizationAgent, OrganizationWorkflow } from "./organization-agent";
 
 export interface ServerContext {
   env: Env;

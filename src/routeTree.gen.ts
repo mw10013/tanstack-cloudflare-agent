@@ -24,6 +24,7 @@ import { Route as AdminSessionsRouteImport } from './routes/admin.sessions'
 import { Route as AdminCustomersRouteImport } from './routes/admin.customers'
 import { Route as MktPricingRouteImport } from './routes/_mkt.pricing'
 import { Route as AppOrganizationIdIndexRouteImport } from './routes/app.$organizationId.index'
+import { Route as AppOrganizationIdWorkflowRouteImport } from './routes/app.$organizationId.workflow'
 import { Route as AppOrganizationIdMembersRouteImport } from './routes/app.$organizationId.members'
 import { Route as AppOrganizationIdInvitationsRouteImport } from './routes/app.$organizationId.invitations'
 import { Route as AppOrganizationIdInspectorRouteImport } from './routes/app.$organizationId.inspector'
@@ -107,6 +108,12 @@ const AppOrganizationIdIndexRoute = AppOrganizationIdIndexRouteImport.update({
   path: '/',
   getParentRoute: () => AppOrganizationIdRoute,
 } as any)
+const AppOrganizationIdWorkflowRoute =
+  AppOrganizationIdWorkflowRouteImport.update({
+    id: '/workflow',
+    path: '/workflow',
+    getParentRoute: () => AppOrganizationIdRoute,
+  } as any)
 const AppOrganizationIdMembersRoute =
   AppOrganizationIdMembersRouteImport.update({
     id: '/members',
@@ -173,6 +180,7 @@ export interface FileRoutesByFullPath {
   '/app/$organizationId/inspector': typeof AppOrganizationIdInspectorRoute
   '/app/$organizationId/invitations': typeof AppOrganizationIdInvitationsRoute
   '/app/$organizationId/members': typeof AppOrganizationIdMembersRoute
+  '/app/$organizationId/workflow': typeof AppOrganizationIdWorkflowRoute
   '/app/$organizationId/': typeof AppOrganizationIdIndexRoute
   '/api/e2e/delete/user/$email': typeof ApiE2eDeleteUserEmailRoute
 }
@@ -194,6 +202,7 @@ export interface FileRoutesByTo {
   '/app/$organizationId/inspector': typeof AppOrganizationIdInspectorRoute
   '/app/$organizationId/invitations': typeof AppOrganizationIdInvitationsRoute
   '/app/$organizationId/members': typeof AppOrganizationIdMembersRoute
+  '/app/$organizationId/workflow': typeof AppOrganizationIdWorkflowRoute
   '/app/$organizationId': typeof AppOrganizationIdIndexRoute
   '/api/e2e/delete/user/$email': typeof ApiE2eDeleteUserEmailRoute
 }
@@ -220,6 +229,7 @@ export interface FileRoutesById {
   '/app/$organizationId/inspector': typeof AppOrganizationIdInspectorRoute
   '/app/$organizationId/invitations': typeof AppOrganizationIdInvitationsRoute
   '/app/$organizationId/members': typeof AppOrganizationIdMembersRoute
+  '/app/$organizationId/workflow': typeof AppOrganizationIdWorkflowRoute
   '/app/$organizationId/': typeof AppOrganizationIdIndexRoute
   '/api/e2e/delete/user/$email': typeof ApiE2eDeleteUserEmailRoute
 }
@@ -246,6 +256,7 @@ export interface FileRouteTypes {
     | '/app/$organizationId/inspector'
     | '/app/$organizationId/invitations'
     | '/app/$organizationId/members'
+    | '/app/$organizationId/workflow'
     | '/app/$organizationId/'
     | '/api/e2e/delete/user/$email'
   fileRoutesByTo: FileRoutesByTo
@@ -267,6 +278,7 @@ export interface FileRouteTypes {
     | '/app/$organizationId/inspector'
     | '/app/$organizationId/invitations'
     | '/app/$organizationId/members'
+    | '/app/$organizationId/workflow'
     | '/app/$organizationId'
     | '/api/e2e/delete/user/$email'
   id:
@@ -292,6 +304,7 @@ export interface FileRouteTypes {
     | '/app/$organizationId/inspector'
     | '/app/$organizationId/invitations'
     | '/app/$organizationId/members'
+    | '/app/$organizationId/workflow'
     | '/app/$organizationId/'
     | '/api/e2e/delete/user/$email'
   fileRoutesById: FileRoutesById
@@ -413,6 +426,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AppOrganizationIdIndexRouteImport
       parentRoute: typeof AppOrganizationIdRoute
     }
+    '/app/$organizationId/workflow': {
+      id: '/app/$organizationId/workflow'
+      path: '/workflow'
+      fullPath: '/app/$organizationId/workflow'
+      preLoaderRoute: typeof AppOrganizationIdWorkflowRouteImport
+      parentRoute: typeof AppOrganizationIdRoute
+    }
     '/app/$organizationId/members': {
       id: '/app/$organizationId/members'
       path: '/members'
@@ -509,6 +529,7 @@ interface AppOrganizationIdRouteChildren {
   AppOrganizationIdInspectorRoute: typeof AppOrganizationIdInspectorRoute
   AppOrganizationIdInvitationsRoute: typeof AppOrganizationIdInvitationsRoute
   AppOrganizationIdMembersRoute: typeof AppOrganizationIdMembersRoute
+  AppOrganizationIdWorkflowRoute: typeof AppOrganizationIdWorkflowRoute
   AppOrganizationIdIndexRoute: typeof AppOrganizationIdIndexRoute
 }
 
@@ -519,6 +540,7 @@ const AppOrganizationIdRouteChildren: AppOrganizationIdRouteChildren = {
   AppOrganizationIdInspectorRoute: AppOrganizationIdInspectorRoute,
   AppOrganizationIdInvitationsRoute: AppOrganizationIdInvitationsRoute,
   AppOrganizationIdMembersRoute: AppOrganizationIdMembersRoute,
+  AppOrganizationIdWorkflowRoute: AppOrganizationIdWorkflowRoute,
   AppOrganizationIdIndexRoute: AppOrganizationIdIndexRoute,
 }
 

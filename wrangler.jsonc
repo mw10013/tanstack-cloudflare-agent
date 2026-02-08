@@ -30,6 +30,13 @@
       }
     ]
   },
+  "workflows": [
+    {
+      "name": "OrganizationWorkflow",
+      "binding": "OrganizationWorkflow",
+      "class_name": "OrganizationWorkflow"
+    }
+  ],
   "migrations": [
     {
       "tag": "v1",
@@ -107,6 +114,13 @@
           }
         ]
       },
+      "workflows": [
+        {
+          "name": "OrganizationWorkflow",
+          "binding": "OrganizationWorkflow",
+          "class_name": "OrganizationWorkflow"
+        }
+      ],
       "migrations": [
         {
           "tag": "v1",

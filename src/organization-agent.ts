@@ -1,6 +1,8 @@
 import type { StreamTextOnFinishCallback, ToolSet } from "ai";
+import type { AgentWorkflowEvent, AgentWorkflowStep, WorkflowInfo } from "agents/workflows";
 import { AIChatAgent } from "@cloudflare/ai-chat";
 import { callable } from "agents";
+import { AgentWorkflow } from "agents/workflows";
 import { convertToModelMessages, generateText, streamText } from "ai";
 import { createOpenAI } from "ai-gateway-provider/providers/openai";
 import { createWorkersAI } from "workers-ai-provider";
@@ -35,7 +37,7 @@ const AgentSchedule = z.object({
 });
 export type AgentSchedule = z.infer<typeof AgentSchedule>;
 
-const AgentWorkflow = z.object({
+const AgentWorkflowRow = z.object({
   id: z.string(),
   workflow_id: z.string(),
   workflow_name: z.string(),
@@ -47,7 +49,7 @@ const AgentWorkflow = z.object({
   updated_at: z.number(),
   completed_at: z.number().nullable(),
 });
-export type AgentWorkflow = z.infer<typeof AgentWorkflow>;
+export type AgentWorkflowRow = z.infer<typeof AgentWorkflowRow>;
 
 const ChatMessage = z.object({
   id: z.string(),
@@ -82,6 +84,73 @@ export const extractAgentName = (request: Request) => {
   }
   return segments[2] ?? null;
 };
+
+export interface ApprovalRequestInfo {
+  id: string;
+  title: string;
+  description: string;
+  status: "pending" | "approved" | "rejected";
+  createdAt: string;
+  resolvedAt?: string;
+  reason?: string;
+}
+
+export class OrganizationWorkflow extends AgentWorkflow<
+  OrganizationAgent,
+  { title: string; description: string },
+  { status: "pending" | "approved" | "rejected"; message: string }
+> {
+  async run(
+    event: AgentWorkflowEvent<{ title: string; description: string }>,
+    step: AgentWorkflowStep,
+  ): Promise<{ approved: boolean; title: string; resolvedAt: string; approvalData?: unknown }> {
+    const { title } = event.payload;
+
+    // eslint-disable-next-line @typescript-eslint/require-await
+    await step.do("prepare-request", async () => ({
+      title,
+      requestedAt: Date.now(),
+    }));
+
+    await this.reportProgress({
+      status: "pending",
+      message: `Waiting for approval: ${title}`,
+    });
+
+    try {
+      const approvalData = await this.waitForApproval<{ approvedBy?: string }>(
+        step,
+        { timeout: "7 days" },
+      );
+
+      const result = {
+        approved: true as const,
+        title,
+        resolvedAt: new Date().toISOString(),
+        approvalData,
+      };
+
+      await this.reportProgress({
+        status: "approved",
+        message: `Approved: ${title}`,
+      });
+
+      await step.reportComplete(result);
+      return result;
+    } catch {
+      await this.reportProgress({
+        status: "rejected",
+        message: `Rejected: ${title}`,
+      });
+
+      return {
+        approved: false,
+        title,
+        resolvedAt: new Date().toISOString(),
+      };
+    }
+  }
+}
 
 export class OrganizationAgent extends AIChatAgent<Env> {
   ping() {
@@ -123,7 +192,7 @@ export class OrganizationAgent extends AIChatAgent<Env> {
   }
 
   getAgentWorkflows() {
-    return AgentWorkflow.array().parse(
+    return AgentWorkflowRow.array().parse(
       this.sql`select * from cf_agents_workflows order by created_at`,
     );
   }
@@ -168,6 +237,153 @@ export class OrganizationAgent extends AIChatAgent<Env> {
       onFinish,
     });
     return result.toUIMessageStreamResponse();
+  }
+
+  private _toApprovalRequest(w: WorkflowInfo): ApprovalRequestInfo {
+    const metadata = w.metadata as {
+      title?: string;
+      description?: string;
+    } | null;
+
+    let status: "pending" | "approved" | "rejected" = "pending";
+    if (w.status === "complete") {
+      status = "approved";
+    } else if (w.status === "errored" || w.status === "terminated") {
+      status = "rejected";
+    }
+
+    return {
+      id: w.workflowId,
+      title: metadata?.title ?? "Untitled",
+      description: metadata?.description ?? "",
+      status,
+      createdAt: w.createdAt.toISOString(),
+      resolvedAt: w.completedAt?.toISOString(),
+      reason: w.error?.message,
+    };
+  }
+
+  // eslint-disable-next-line @typescript-eslint/require-await
+  async onWorkflowProgress(
+    _workflowName: string,
+    workflowId: string,
+    progress: { status: "pending" | "approved" | "rejected"; message: string },
+  ): Promise<void> {
+    this.broadcast(
+      JSON.stringify({
+        type: "workflow_progress",
+        workflowId,
+        progress,
+      }),
+    );
+  }
+
+  // eslint-disable-next-line @typescript-eslint/require-await
+  async onWorkflowComplete(
+    _workflowName: string,
+    workflowId: string,
+    result?: { approved: boolean },
+  ): Promise<void> {
+    this.broadcast(
+      JSON.stringify({
+        type: "workflow_complete",
+        workflowId,
+        result,
+      }),
+    );
+  }
+
+  // eslint-disable-next-line @typescript-eslint/require-await
+  async onWorkflowError(
+    _workflowName: string,
+    workflowId: string,
+    error: string,
+  ): Promise<void> {
+    this.broadcast(
+      JSON.stringify({
+        type: "workflow_error",
+        workflowId,
+        error,
+      }),
+    );
+  }
+
+  @callable()
+  async requestApproval(
+    title: string,
+    description: string,
+  ): Promise<ApprovalRequestInfo> {
+    const workflowId = await this.runWorkflow(
+      "OrganizationWorkflow",
+      { title, description },
+      { metadata: { title, description } },
+    );
+
+    this.broadcast(
+      JSON.stringify({
+        type: "approval_requested",
+        workflowId,
+        title,
+      }),
+    );
+
+    return {
+      id: workflowId,
+      title,
+      description,
+      status: "pending",
+      createdAt: new Date().toISOString(),
+    };
+  }
+
+  @callable()
+  async approveRequest(workflowId: string): Promise<boolean> {
+    const workflow = this.getWorkflow(workflowId);
+    if (
+      !workflow ||
+      workflow.status === "complete" ||
+      workflow.status === "errored" ||
+      workflow.status === "terminated"
+    ) {
+      return false;
+    }
+
+    await this.approveWorkflow(workflowId, {
+      reason: "Approved",
+      metadata: { approvedBy: "user" },
+    });
+
+    return true;
+  }
+
+  @callable()
+  async rejectRequest(
+    workflowId: string,
+    reason?: string,
+  ): Promise<boolean> {
+    const workflow = this.getWorkflow(workflowId);
+    if (
+      !workflow ||
+      workflow.status === "complete" ||
+      workflow.status === "errored" ||
+      workflow.status === "terminated"
+    ) {
+      return false;
+    }
+
+    await this.rejectWorkflow(workflowId, {
+      reason: reason ?? "Rejected",
+    });
+
+    return true;
+  }
+
+  @callable()
+  listApprovalRequests(): ApprovalRequestInfo[] {
+    const { workflows } = this.getWorkflows({
+      workflowName: "OrganizationWorkflow",
+    });
+    return workflows.map((w) => this._toApprovalRequest(w));
   }
 
   @callable()
