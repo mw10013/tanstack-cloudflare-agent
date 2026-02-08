@@ -1,7 +1,4 @@
-import type {
-  ApprovalRequestInfo,
-  OrganizationAgent,
-} from "@/organization-agent";
+import type { OrganizationAgent } from "@/organization-agent";
 import { useForm } from "@tanstack/react-form";
 import { useMutation } from "@tanstack/react-query";
 import {
@@ -9,7 +6,7 @@ import {
   useHydrated,
   useRouter,
 } from "@tanstack/react-router";
-import { createServerFn, useServerFn } from "@tanstack/react-start";
+import { createServerFn } from "@tanstack/react-start";
 import { useAgent } from "agents/react";
 import { AlertCircle, Check, Play, X } from "lucide-react";
 import * as z from "zod";
@@ -41,52 +38,9 @@ const getLoaderData = createServerFn({ method: "GET" })
   });
 
 const requestApprovalSchema = z.object({
-  organizationId: z.string(),
   title: z.string().trim().min(1, "Title is required"),
   description: z.string().trim(),
 });
-
-const requestApprovalFn = createServerFn({ method: "POST" })
-  .inputValidator(requestApprovalSchema)
-  .handler(
-    async ({
-      context: { env },
-      data: { organizationId, title, description },
-    }): Promise<ApprovalRequestInfo> => {
-      const id = env.ORGANIZATION_AGENT.idFromName(organizationId);
-      const stub = env.ORGANIZATION_AGENT.get(id);
-      const { [Symbol.dispose]: _, ...result } = await stub.requestApproval(
-        title,
-        description,
-      );
-      return result;
-    },
-  );
-
-const workflowActionSchema = z.object({
-  organizationId: z.string(),
-  workflowId: z.string(),
-});
-
-const approveRequestFn = createServerFn({ method: "POST" })
-  .inputValidator(workflowActionSchema)
-  .handler(
-    async ({ context: { env }, data: { organizationId, workflowId } }) => {
-      const id = env.ORGANIZATION_AGENT.idFromName(organizationId);
-      const stub = env.ORGANIZATION_AGENT.get(id);
-      return stub.approveRequest(workflowId) as Promise<boolean>;
-    },
-  );
-
-const rejectRequestFn = createServerFn({ method: "POST" })
-  .inputValidator(workflowActionSchema)
-  .handler(
-    async ({ context: { env }, data: { organizationId, workflowId } }) => {
-      const id = env.ORGANIZATION_AGENT.idFromName(organizationId);
-      const stub = env.ORGANIZATION_AGENT.get(id);
-      return stub.rejectRequest(workflowId) as Promise<boolean>;
-    },
-  );
 
 export const Route = createFileRoute("/app/$organizationId/workflow")({
   loader: ({ params }) => getLoaderData({ data: params.organizationId }),
@@ -117,7 +71,7 @@ function RouteComponent() {
   const isHydrated = useHydrated();
   const router = useRouter();
 
-  useAgent<OrganizationAgent, unknown>({
+  const agent = useAgent<OrganizationAgent, unknown>({
     agent: "organization-agent",
     name: organizationId,
     onMessage: (event) => {
@@ -137,13 +91,12 @@ function RouteComponent() {
     },
   });
 
-  const requestApprovalServerFn = useServerFn(requestApprovalFn);
-  const approveRequestServerFn = useServerFn(approveRequestFn);
-  const rejectRequestServerFn = useServerFn(rejectRequestFn);
-
   const requestMutation = useMutation({
-    mutationFn: (data: z.input<typeof requestApprovalSchema>) =>
-      requestApprovalServerFn({ data }),
+    mutationFn: ({
+      title,
+      description,
+    }: z.input<typeof requestApprovalSchema>) =>
+      agent.stub.requestApproval(title, description),
     onSuccess: () => {
       form.reset();
       void router.invalidate();
@@ -151,16 +104,14 @@ function RouteComponent() {
   });
 
   const approveMutation = useMutation<boolean, Error, string>({
-    mutationFn: (workflowId) =>
-      approveRequestServerFn({ data: { organizationId, workflowId } }),
+    mutationFn: (workflowId) => agent.stub.approveRequest(workflowId),
     onSuccess: () => {
       void router.invalidate();
     },
   });
 
   const rejectMutation = useMutation<boolean, Error, string>({
-    mutationFn: (workflowId) =>
-      rejectRequestServerFn({ data: { organizationId, workflowId } }),
+    mutationFn: (workflowId) => agent.stub.rejectRequest(workflowId),
     onSuccess: () => {
       void router.invalidate();
     },
@@ -168,7 +119,6 @@ function RouteComponent() {
 
   const form = useForm({
     defaultValues: {
-      organizationId,
       title: "",
       description: "",
     },
