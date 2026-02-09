@@ -25,6 +25,7 @@ import { Route as AdminCustomersRouteImport } from './routes/admin.customers'
 import { Route as MktPricingRouteImport } from './routes/_mkt.pricing'
 import { Route as AppOrganizationIdIndexRouteImport } from './routes/app.$organizationId.index'
 import { Route as AppOrganizationIdWorkflowRouteImport } from './routes/app.$organizationId.workflow'
+import { Route as AppOrganizationIdUploadRouteImport } from './routes/app.$organizationId.upload'
 import { Route as AppOrganizationIdMembersRouteImport } from './routes/app.$organizationId.members'
 import { Route as AppOrganizationIdInvitationsRouteImport } from './routes/app.$organizationId.invitations'
 import { Route as AppOrganizationIdInspectorRouteImport } from './routes/app.$organizationId.inspector'
@@ -114,6 +115,11 @@ const AppOrganizationIdWorkflowRoute =
     path: '/workflow',
     getParentRoute: () => AppOrganizationIdRoute,
   } as any)
+const AppOrganizationIdUploadRoute = AppOrganizationIdUploadRouteImport.update({
+  id: '/upload',
+  path: '/upload',
+  getParentRoute: () => AppOrganizationIdRoute,
+} as any)
 const AppOrganizationIdMembersRoute =
   AppOrganizationIdMembersRouteImport.update({
     id: '/members',
@@ -180,6 +186,7 @@ export interface FileRoutesByFullPath {
   '/app/$organizationId/inspector': typeof AppOrganizationIdInspectorRoute
   '/app/$organizationId/invitations': typeof AppOrganizationIdInvitationsRoute
   '/app/$organizationId/members': typeof AppOrganizationIdMembersRoute
+  '/app/$organizationId/upload': typeof AppOrganizationIdUploadRoute
   '/app/$organizationId/workflow': typeof AppOrganizationIdWorkflowRoute
   '/app/$organizationId/': typeof AppOrganizationIdIndexRoute
   '/api/e2e/delete/user/$email': typeof ApiE2eDeleteUserEmailRoute
@@ -202,6 +209,7 @@ export interface FileRoutesByTo {
   '/app/$organizationId/inspector': typeof AppOrganizationIdInspectorRoute
   '/app/$organizationId/invitations': typeof AppOrganizationIdInvitationsRoute
   '/app/$organizationId/members': typeof AppOrganizationIdMembersRoute
+  '/app/$organizationId/upload': typeof AppOrganizationIdUploadRoute
   '/app/$organizationId/workflow': typeof AppOrganizationIdWorkflowRoute
   '/app/$organizationId': typeof AppOrganizationIdIndexRoute
   '/api/e2e/delete/user/$email': typeof ApiE2eDeleteUserEmailRoute
@@ -229,6 +237,7 @@ export interface FileRoutesById {
   '/app/$organizationId/inspector': typeof AppOrganizationIdInspectorRoute
   '/app/$organizationId/invitations': typeof AppOrganizationIdInvitationsRoute
   '/app/$organizationId/members': typeof AppOrganizationIdMembersRoute
+  '/app/$organizationId/upload': typeof AppOrganizationIdUploadRoute
   '/app/$organizationId/workflow': typeof AppOrganizationIdWorkflowRoute
   '/app/$organizationId/': typeof AppOrganizationIdIndexRoute
   '/api/e2e/delete/user/$email': typeof ApiE2eDeleteUserEmailRoute
@@ -256,6 +265,7 @@ export interface FileRouteTypes {
     | '/app/$organizationId/inspector'
     | '/app/$organizationId/invitations'
     | '/app/$organizationId/members'
+    | '/app/$organizationId/upload'
     | '/app/$organizationId/workflow'
     | '/app/$organizationId/'
     | '/api/e2e/delete/user/$email'
@@ -278,6 +288,7 @@ export interface FileRouteTypes {
     | '/app/$organizationId/inspector'
     | '/app/$organizationId/invitations'
     | '/app/$organizationId/members'
+    | '/app/$organizationId/upload'
     | '/app/$organizationId/workflow'
     | '/app/$organizationId'
     | '/api/e2e/delete/user/$email'
@@ -304,6 +315,7 @@ export interface FileRouteTypes {
     | '/app/$organizationId/inspector'
     | '/app/$organizationId/invitations'
     | '/app/$organizationId/members'
+    | '/app/$organizationId/upload'
     | '/app/$organizationId/workflow'
     | '/app/$organizationId/'
     | '/api/e2e/delete/user/$email'
@@ -433,6 +445,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AppOrganizationIdWorkflowRouteImport
       parentRoute: typeof AppOrganizationIdRoute
     }
+    '/app/$organizationId/upload': {
+      id: '/app/$organizationId/upload'
+      path: '/upload'
+      fullPath: '/app/$organizationId/upload'
+      preLoaderRoute: typeof AppOrganizationIdUploadRouteImport
+      parentRoute: typeof AppOrganizationIdRoute
+    }
     '/app/$organizationId/members': {
       id: '/app/$organizationId/members'
       path: '/members'
@@ -529,6 +548,7 @@ interface AppOrganizationIdRouteChildren {
   AppOrganizationIdInspectorRoute: typeof AppOrganizationIdInspectorRoute
   AppOrganizationIdInvitationsRoute: typeof AppOrganizationIdInvitationsRoute
   AppOrganizationIdMembersRoute: typeof AppOrganizationIdMembersRoute
+  AppOrganizationIdUploadRoute: typeof AppOrganizationIdUploadRoute
   AppOrganizationIdWorkflowRoute: typeof AppOrganizationIdWorkflowRoute
   AppOrganizationIdIndexRoute: typeof AppOrganizationIdIndexRoute
 }
@@ -540,6 +560,7 @@ const AppOrganizationIdRouteChildren: AppOrganizationIdRouteChildren = {
   AppOrganizationIdInspectorRoute: AppOrganizationIdInspectorRoute,
   AppOrganizationIdInvitationsRoute: AppOrganizationIdInvitationsRoute,
   AppOrganizationIdMembersRoute: AppOrganizationIdMembersRoute,
+  AppOrganizationIdUploadRoute: AppOrganizationIdUploadRoute,
   AppOrganizationIdWorkflowRoute: AppOrganizationIdWorkflowRoute,
   AppOrganizationIdIndexRoute: AppOrganizationIdIndexRoute,
 }
