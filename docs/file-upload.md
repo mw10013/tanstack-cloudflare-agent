@@ -64,7 +64,7 @@ TanStack Form manages field state as a plain JS object — a field value can be 
 This means:
 
 - **Client-side schema** validates `{ title: string, file: File }` from the form state object
-- **Server fn `inputValidator`** receives `FormData`, extracts fields via `.get()`, and Zod-parses the extracted object
+- **Server fn `inputValidator`** receives `FormData`, converts via `Object.fromEntries(data)`, and Zod-parses the result
 - **`.handler`** receives fully validated, typed data
 
 ### Validation flow
@@ -72,7 +72,7 @@ This means:
 | Layer | What validates | What it sees |
 |---|---|---|
 | `validators.onSubmit` (client) | Zod schema with `z.file()` | Raw `File` object from form state |
-| `inputValidator` (server fn) | `instanceof FormData` check + Zod parse on extracted fields | `FormData` (HTTP transport) |
+| `inputValidator` (server fn) | `instanceof FormData` check + `Object.fromEntries` + Zod parse | `FormData` (HTTP transport) |
 | `.handler` (server) | Nothing — data is already validated | Typed `{ title: string, file: File }` |
 
 ## Codebase form pattern
@@ -85,7 +85,7 @@ The established pattern (see `src/routes/login.tsx`, `src/routes/app.$organizati
 4. `useMutation.mutationFn` typed with `z.input<typeof schema>`
 5. `onSubmit` calls `mutation.mutate(value)`
 
-For file upload, the difference is that `onSubmit` must convert the form value to `FormData` before calling `mutate`, and the `inputValidator` must extract from `FormData` before Zod-parsing.
+For file upload, the difference is that `onSubmit` must convert the form value to `FormData` before calling `mutate`, and the `inputValidator` must convert from `FormData` via `Object.fromEntries` before Zod-parsing.
 
 ## Example
 
@@ -114,7 +114,10 @@ const uploadFormSchema = z.object({
     .mime(["image/png", "image/jpeg", "application/pdf"]),
 });
 
-// --- Server fn: receives FormData, extracts and validates in inputValidator ---
+// --- Server fn: receives FormData, converts and validates in inputValidator ---
+// Object.fromEntries(data) avoids stringly-typed .get() calls — field names defined once in the schema.
+// Zod handles type discrimination: z.string() rejects File, z.file() rejects string.
+// Caveat: Object.fromEntries keeps only the last value per key, so not suitable for <input type="file" multiple>.
 const uploadFile = createServerFn({ method: "POST" })
   .inputValidator((data) => {
     if (!(data instanceof FormData)) throw new Error("Expected FormData");
@@ -123,12 +126,9 @@ const uploadFile = createServerFn({ method: "POST" })
         title: z.string().trim().min(1),
         file: z.file().max(5_000_000).mime(["image/png", "image/jpeg", "application/pdf"]),
       })
-      .parse({
-        title: data.get("title"),
-        file: data.get("file"),
-      });
+      .parse(Object.fromEntries(data));
   })
-  .handler(async ({ data }) => {
+  .handler(({ data }) => {
     // data is already { title: string, file: File } — fully validated
     // const bytes = await data.file.arrayBuffer();
     // await env.R2_BUCKET.put(data.file.name, bytes);
@@ -272,9 +272,10 @@ function RouteComponent() {
 | Don't set `Content-Type` manually | When passing `FormData` to `fetch`, the browser auto-generates `multipart/form-data; boundary=...`. Setting it yourself breaks parsing. |
 | File in TanStack Form state | Store `File \| null` in `defaultValues`. Convert to `FormData` before sending. |
 | `<input type="file">` is uncontrolled | No `value` prop — only `onChange`. The `Input` component already has `file:` prefixed styles. |
-| Zod can't validate `FormData` directly | Extract fields with `.get()` first, then pass the plain object to Zod. |
+| Zod can't validate `FormData` directly | Use `Object.fromEntries(data)` to convert to a plain object, then pass to Zod. Zod handles type discrimination (`z.string()` rejects `File`, `z.file()` rejects `string`). |
+| `Object.fromEntries` caveat | Keeps only the last value per key. Not suitable for `<input type="file" multiple>` (multiple files under one key) — use `data.getAll()` for that. |
 | Cloudflare Workers body size | 100MB request body limit (free plan). For large files, consider presigned URLs to R2 directly. |
-| Two schemas | Client schema validates form state (`File` object). Server `inputValidator` extracts from `FormData` then Zod-parses. They validate the same constraints but operate on different input shapes. |
+| Two schemas | Client schema validates form state (`File` object). Server `inputValidator` converts `FormData` via `Object.fromEntries` then Zod-parses. They validate the same constraints but operate on different input shapes. |
 
 ## Doc sources
 
