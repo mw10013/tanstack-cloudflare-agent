@@ -1,7 +1,11 @@
-import type { StreamTextOnFinishCallback, ToolSet } from "ai";
-import type { AgentWorkflowEvent, AgentWorkflowStep, WorkflowInfo } from "agents/workflows";
-import { AIChatAgent } from "@cloudflare/ai-chat";
 import type { AgentContext } from "agents";
+import type {
+  AgentWorkflowEvent,
+  AgentWorkflowStep,
+  WorkflowInfo,
+} from "agents/workflows";
+import type { StreamTextOnFinishCallback, ToolSet } from "ai";
+import { AIChatAgent } from "@cloudflare/ai-chat";
 import { callable } from "agents";
 import { AgentWorkflow } from "agents/workflows";
 import { convertToModelMessages, generateText, streamText } from "ai";
@@ -104,7 +108,12 @@ export class OrganizationWorkflow extends AgentWorkflow<
   async run(
     event: AgentWorkflowEvent<{ title: string; description: string }>,
     step: AgentWorkflowStep,
-  ): Promise<{ approved: boolean; title: string; resolvedAt: string; approvalData?: unknown }> {
+  ): Promise<{
+    approved: boolean;
+    title: string;
+    resolvedAt: string;
+    approvalData?: unknown;
+  }> {
     const { title } = event.payload;
 
     // eslint-disable-next-line @typescript-eslint/require-await
@@ -156,14 +165,8 @@ export class OrganizationWorkflow extends AgentWorkflow<
 export class OrganizationAgent extends AIChatAgent<Env> {
   constructor(ctx: AgentContext, env: Env) {
     super(ctx, env);
-    void this.sql`create table if not exists PendingUpload (
-      title text primary key,
-      createdAt integer not null
-    )`;
-    void this.sql`create table if not exists Upload (
-      title text primary key,
-      createdAt integer not null
-    )`;
+    void this
+      .sql`create table if not exists Upload (name text primary key, createdAt integer not null)`;
   }
 
   ping() {
@@ -179,27 +182,9 @@ export class OrganizationAgent extends AIChatAgent<Env> {
     return "bang";
   }
 
-  /**
-   * Reservation pattern for non-atomic R2 put + metadata recording.
-   *
-   * Flow: reserveUpload → R2.put → confirmUpload.
-   * If R2.put or confirmUpload fails, the PendingUpload row remains
-   * for future scavenging (head the R2 key to decide: confirm or discard).
-   * Idempotent: insert-or-replace handles retries and re-uploads.
-   */
-  @callable()
-  reserveUpload(title: string) {
-    void this.sql`insert or replace into PendingUpload (title, createdAt) values (${title}, ${Date.now()})`;
-  }
-
-  @callable()
-  confirmUpload(title: string) {
-    this.ctx.storage.transactionSync(() => {
-      const rows = this.sql`select createdAt from PendingUpload where title = ${title}`;
-      if (rows.length === 0) throw new Error(`No pending upload for title: ${title}`);
-      void this.sql`delete from PendingUpload where title = ${title}`;
-      void this.sql`insert or replace into Upload (title, createdAt) values (${title}, ${rows[0].createdAt as number})`;
-    });
+  onUpload(upload: { name: string }) {
+    void this.sql`insert or replace into Upload (name, createdAt)
+      values (${upload.name}, ${Date.now()})`;
   }
 
   @callable()
@@ -212,10 +197,7 @@ export class OrganizationAgent extends AIChatAgent<Env> {
     return AgentState.array().parse(
       rows.map((r) => ({
         ...r,
-        state:
-          typeof r.state === "string"
-            ? r.state
-            : JSON.stringify(r.state),
+        state: typeof r.state === "string" ? r.state : JSON.stringify(r.state),
       })),
     );
   }
@@ -239,21 +221,21 @@ export class OrganizationAgent extends AIChatAgent<Env> {
   }
 
   getChatMessages() {
-    const rows = this.sql`select * from cf_ai_chat_agent_messages order by created_at`;
+    const rows = this
+      .sql`select * from cf_ai_chat_agent_messages order by created_at`;
     return ChatMessage.array().parse(
       rows.map((r) => ({
         ...r,
         message:
-          typeof r.message === "string"
-            ? r.message
-            : JSON.stringify(r.message),
+          typeof r.message === "string" ? r.message : JSON.stringify(r.message),
       })),
     );
   }
 
   getChatStreamChunks() {
     return ChatStreamChunk.array().parse(
-      this.sql`select * from cf_ai_chat_stream_chunks order by stream_id, chunk_index`,
+      this
+        .sql`select * from cf_ai_chat_stream_chunks order by stream_id, chunk_index`,
     );
   }
 
@@ -398,10 +380,7 @@ export class OrganizationAgent extends AIChatAgent<Env> {
   }
 
   @callable()
-  async rejectRequest(
-    workflowId: string,
-    reason?: string,
-  ): Promise<boolean> {
+  async rejectRequest(workflowId: string, reason?: string): Promise<boolean> {
     const workflow = this.getWorkflow(workflowId);
     if (
       !workflow ||

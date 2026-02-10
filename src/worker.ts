@@ -124,4 +124,39 @@ export default {
       }
     }
   },
+
+  async queue(batch, env) {
+    for (const message of batch.messages) {
+      const notification = message.body as {
+        account: string;
+        action: string;
+        bucket: string;
+        object: { key: string; size: number; eTag: string };
+        eventTime: string;
+      };
+      const head = await env.R2.head(notification.object.key);
+      if (!head) {
+        console.warn(
+          "R2 object deleted before notification processed:",
+          notification.object.key,
+        );
+        message.ack();
+        continue;
+      }
+      const organizationId = head.customMetadata?.organizationId;
+      const name = head.customMetadata?.name;
+      if (!organizationId || !name) {
+        console.error(
+          "Missing customMetadata on R2 object:",
+          notification.object.key,
+        );
+        message.ack();
+        continue;
+      }
+      const id = env.ORGANIZATION_AGENT.idFromName(organizationId);
+      const stub = env.ORGANIZATION_AGENT.get(id);
+      await stub.onUpload({ name });
+      message.ack();
+    }
+  },
 } satisfies ExportedHandler<Env>;

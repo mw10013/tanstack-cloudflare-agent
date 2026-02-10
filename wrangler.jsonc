@@ -57,6 +57,23 @@
     }
   ],
   "r2_buckets": [{ "binding": "R2", "bucket_name": "uploads" }],
+  "queues": {
+    "producers": [
+      {
+        "queue": "r2-upload-notifications",
+        "binding": "R2_UPLOAD_QUEUE"
+      }
+    ],
+    "consumers": [
+      {
+        "queue": "r2-upload-notifications",
+        "max_batch_size": 10,
+        "max_batch_timeout": 5,
+        "max_retries": 3,
+        "dead_letter_queue": "r2-upload-notifications-dlq"
+      }
+    ]
+  },
   "ratelimits": [
     {
       "name": "MAGIC_LINK_RATE_LIMITER",
@@ -98,6 +115,23 @@
         }
       ],
       "r2_buckets": [{ "binding": "R2", "bucket_name": "uploads" }],
+      "queues": {
+        "producers": [
+          {
+            "queue": "r2-upload-notifications",
+            "binding": "R2_UPLOAD_QUEUE"
+          }
+        ],
+        "consumers": [
+          {
+            "queue": "r2-upload-notifications",
+            "max_batch_size": 10,
+            "max_batch_timeout": 5,
+            "max_retries": 3,
+            "dead_letter_queue": "r2-upload-notifications-dlq"
+          }
+        ]
+      },
       "ratelimits": [
         {
           "name": "MAGIC_LINK_RATE_LIMITER",
