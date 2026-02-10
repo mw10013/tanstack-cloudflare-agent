@@ -1,6 +1,7 @@
 import type { StreamTextOnFinishCallback, ToolSet } from "ai";
 import type { AgentWorkflowEvent, AgentWorkflowStep, WorkflowInfo } from "agents/workflows";
 import { AIChatAgent } from "@cloudflare/ai-chat";
+import type { AgentContext } from "agents";
 import { callable } from "agents";
 import { AgentWorkflow } from "agents/workflows";
 import { convertToModelMessages, generateText, streamText } from "ai";
@@ -153,6 +154,18 @@ export class OrganizationWorkflow extends AgentWorkflow<
 }
 
 export class OrganizationAgent extends AIChatAgent<Env> {
+  constructor(ctx: AgentContext, env: Env) {
+    super(ctx, env);
+    void this.sql`create table if not exists PendingUpload (
+      title text primary key,
+      createdAt integer not null
+    )`;
+    void this.sql`create table if not exists Upload (
+      title text primary key,
+      createdAt integer not null
+    )`;
+  }
+
   ping() {
     return {
       ok: true,
@@ -164,6 +177,34 @@ export class OrganizationAgent extends AIChatAgent<Env> {
   @callable()
   bang() {
     return "bang";
+  }
+
+  /**
+   * Reservation pattern for non-atomic R2 put + metadata recording.
+   *
+   * Flow: reserveUpload → R2.put → confirmUpload.
+   * If R2.put or confirmUpload fails, the PendingUpload row remains
+   * for future scavenging (head the R2 key to decide: confirm or discard).
+   * Idempotent: insert-or-replace handles retries and re-uploads.
+   */
+  @callable()
+  reserveUpload(title: string) {
+    void this.sql`insert or replace into PendingUpload (title, createdAt) values (${title}, ${Date.now()})`;
+  }
+
+  @callable()
+  confirmUpload(title: string) {
+    this.ctx.storage.transactionSync(() => {
+      const rows = this.sql`select createdAt from PendingUpload where title = ${title}`;
+      if (rows.length === 0) throw new Error(`No pending upload for title: ${title}`);
+      void this.sql`delete from PendingUpload where title = ${title}`;
+      void this.sql`insert or replace into Upload (title, createdAt) values (${title}, ${rows[0].createdAt as number})`;
+    });
+  }
+
+  @callable()
+  listUploads() {
+    return this.sql`select * from Upload order by createdAt desc`;
   }
 
   getAgentState() {

@@ -1,3 +1,4 @@
+import { invariant } from "@epic-web/invariant";
 import { useForm } from "@tanstack/react-form";
 import { useMutation } from "@tanstack/react-query";
 import { createFileRoute, useHydrated } from "@tanstack/react-router";
@@ -43,11 +44,19 @@ const uploadFile = createServerFn({ method: "POST" })
       })
       .parse(Object.fromEntries(data));
   })
-  .handler(({ data }) => {
-    console.log(
-      `Uploaded: ${data.file.name} (${String(data.file.size)} bytes, ${data.file.type})`,
-    );
-    return { success: true, name: data.file.name, size: data.file.size };
+  .handler(async ({ context: { session, env }, data }) => {
+    invariant(session, "Missing session");
+    const organizationId = session.session.activeOrganizationId;
+    invariant(organizationId, "Missing active organization");
+    const id = env.ORGANIZATION_AGENT.idFromName(organizationId);
+    const stub = env.ORGANIZATION_AGENT.get(id);
+    const key = `${organizationId}/${data.title}`;
+    await stub.reserveUpload(data.title);
+    await env.R2.put(key, data.file, {
+      httpMetadata: { contentType: data.file.type },
+    });
+    await stub.confirmUpload(data.title);
+    return { success: true, title: data.title, size: data.file.size };
   });
 
 export const Route = createFileRoute("/app/$organizationId/upload")({
@@ -117,7 +126,7 @@ function RouteComponent() {
                 <Alert>
                   <AlertTitle>Uploaded</AlertTitle>
                   <AlertDescription>
-                    {uploadMutation.data.name} (
+                    {uploadMutation.data.title} (
                     {Math.round(uploadMutation.data.size / 1024)} KB)
                   </AlertDescription>
                 </Alert>
