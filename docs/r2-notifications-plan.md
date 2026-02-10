@@ -68,22 +68,20 @@ Drop `PendingUpload`. Simplify `Upload`:
 ```sql
 create table if not exists Upload (
   name text primary key,
-  contentType text not null,
-  size integer not null,
   createdAt integer not null
 )
 ```
 
 - `name`: user-specified name, primary key (unique within org, same as before)
-- `contentType`: from `httpMetadata.contentType` via `head()` — useful for serving/display
-- `size`: from `head()` response — useful for display
 - `createdAt`: `Date.now()` at record time (when notification is processed)
+
+No `contentType` or `size` columns — R2 is the source of truth for object metadata. Retrieve via `head()` on demand if needed for display.
 
 No `PendingUpload` table. No scavenging.
 
 ## Server Fn (Upload Path)
 
-Simplified — no agent RPC calls:
+Simplified — no agent RPC calls in production. In local dev, manually produces a fake notification to the queue since R2 event notifications do not fire locally (confirmed: wrangler dev / miniflare does not simulate the R2 → Queue notification pipeline — see "Local Dev" section below).
 
 ```ts
 const uploadFile = createServerFn({ method: "POST" })
@@ -95,11 +93,21 @@ const uploadFile = createServerFn({ method: "POST" })
       httpMetadata: { contentType: data.file.type },
       customMetadata: { organizationId, name: data.name },
     });
+    if (env.ENVIRONMENT === "local") {
+      await env.R2_UPLOAD_QUEUE.send({
+        account: "local",
+        action: "PutObject",
+        bucket: "uploads",
+        object: { key, size: data.file.size, eTag: "local" },
+        eventTime: new Date().toISOString(),
+      });
+    }
     return { success: true, name: data.name, size: data.file.size };
   });
 ```
 
-One call. If `R2.put` fails, the user gets an error. If it succeeds, the notification will eventually fire and the agent will record it.
+- Production: `R2.put` only. Notification fires via Cloudflare infrastructure.
+- Local: `R2.put` + manual `send()` to the queue. Exercises the full `queue()` → `head()` → `recordUpload()` path locally.
 
 ## Queue Consumer (Notification Path)
 
@@ -159,11 +167,15 @@ Idempotent via `insert or replace`. If the notification fires twice (at-least-on
 
 ## Wrangler Config Changes
 
-Add queue consumer binding:
+Add queue consumer binding and producer binding (producer needed for local dev simulation):
 
 ```jsonc
 // wrangler.jsonc (both top-level and env.production)
 "queues": {
+  "producers": [{
+    "queue": "r2-upload-notifications",
+    "binding": "R2_UPLOAD_QUEUE"
+  }],
   "consumers": [{
     "queue": "r2-upload-notifications",
     "max_batch_size": 10,
@@ -172,7 +184,9 @@ Add queue consumer binding:
 }
 ```
 
-R2 bucket binding stays the same. No producer binding needed — R2 notifications push directly to the queue.
+- Consumer: receives notifications (from R2 in production, from producer in local dev)
+- Producer (`R2_UPLOAD_QUEUE`): only used in local dev to simulate the notification that R2 would normally fire. In production it's unused but harmless — just a binding that sits there.
+- R2 bucket binding stays the same.
 
 ## Imperative Setup (Not in wrangler.jsonc)
 
@@ -223,12 +237,34 @@ New file overwrites in R2. New notification fires. `head()` returns new metadata
 
 Between `R2.put` returning and the notification being processed, the Upload table doesn't yet have the record. The upload route returns success immediately, so the UI shows success. If the user navigates to a list view, the upload might not appear for a few seconds. Accept this — it's the tradeoff for simplicity.
 
+## Local Dev
+
+R2 event notifications **do not work locally**. `wrangler dev` / miniflare simulates R2 storage and Queues producer→consumer, but not the R2 → Queue notification pipeline. This is a Cloudflare infrastructure-level feature with no local simulation. Confirmed via:
+
+- [Cloudflare Community thread (Mar 2025)](https://community.cloudflare.com/t/test-r2-event-notifications-queues-locally/782729): zero workarounds, zero replies from Cloudflare
+- Queues local dev docs only cover Worker-to-Worker produce/consume
+- No GitHub issues or PRs in `cloudflare/workers-sdk` for this
+- Queues also don't work in remote mode (`wrangler dev --remote`)
+
+**Workaround: producer-side simulation.** The server fn checks `env.ENVIRONMENT === "local"` and manually sends a fake R2 notification message to the queue via the producer binding (`R2_UPLOAD_QUEUE`). Since Queues producer→consumer *does* work locally in miniflare, this exercises the real `queue()` handler code path including `head()` and `recordUpload()`.
+
+What this tests locally:
+- `R2.put` with `customMetadata` ✓
+- Queue message delivery and batching ✓
+- `queue()` handler parsing ✓
+- `R2.head()` retrieving metadata from local R2 ✓
+- Agent RPC `recordUpload()` ✓
+
+What this does NOT test locally:
+- The actual R2 → Queue notification trigger (infrastructure-only, deploy to test)
+- Notification filtering by prefix/suffix rules
+
 ## Migration Steps
 
-1. Add queue consumer config to `wrangler.jsonc`
+1. Add queue producer + consumer config to `wrangler.jsonc` (both top-level and env.production)
 2. Add `queue()` handler to `src/worker.ts`
 3. Add `recordUpload()` method to `OrganizationAgent`, update `Upload` table schema (add `contentType`, `size` columns; rename `title` → `name`)
-4. Simplify upload server fn: remove `reserveUpload`/`confirmUpload` calls, add `customMetadata` to `R2.put`
+4. Update upload server fn: remove `reserveUpload`/`confirmUpload` calls, add `customMetadata` to `R2.put`, add local dev queue simulation
 5. Remove `reserveUpload()`, `confirmUpload()` methods and `PendingUpload` table from agent
 6. Rename `title` → `name` in form schema, UI labels, types
 7. Run `wrangler types` to regenerate `worker-configuration.d.ts`
@@ -239,4 +275,3 @@ Between `R2.put` returning and the notification being processed, the Upload tabl
 - Should we add a `listUploads` loader to the upload page so users see existing uploads? Currently `listUploads()` exists but isn't wired to a route loader.
 - Dead letter queue: configure one for failed notification processing? Probably yes for production.
 - Should the queue consumer also handle `object-delete` events to remove Upload rows when objects are deleted directly from R2?
-- Local dev: does `wrangler dev` support R2 event notifications locally? If not, we may need a dev-mode fallback that calls `recordUpload` directly from the server fn.
