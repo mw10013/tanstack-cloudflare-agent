@@ -100,6 +100,16 @@ export interface ApprovalRequestInfo {
   reason?: string;
 }
 
+export const organizationMessageSchema = z.discriminatedUnion("type", [
+  z.object({ type: z.literal("upload_complete"), name: z.string(), createdAt: z.number() }),
+  z.object({ type: z.literal("upload_error"), name: z.string(), error: z.string() }),
+  z.object({ type: z.literal("workflow_progress"), workflowId: z.string(), progress: z.object({ status: z.string(), message: z.string() }) }),
+  z.object({ type: z.literal("workflow_complete"), workflowId: z.string(), result: z.object({ approved: z.boolean() }).optional() }),
+  z.object({ type: z.literal("workflow_error"), workflowId: z.string(), error: z.string() }),
+  z.object({ type: z.literal("approval_requested"), workflowId: z.string(), title: z.string() }),
+]);
+export type OrganizationMessage = z.infer<typeof organizationMessageSchema>;
+
 export class OrganizationWorkflow extends AgentWorkflow<
   OrganizationAgent,
   { title: string; description: string },
@@ -182,9 +192,15 @@ export class OrganizationAgent extends AIChatAgent<Env> {
     return "bang";
   }
 
+  protected broadcastMessage(msg: OrganizationMessage) {
+    this.broadcast(JSON.stringify(msg));
+  }
+
   onUpload(upload: { name: string }) {
+    const createdAt = Date.now();
     void this.sql`insert or replace into Upload (name, createdAt)
-      values (${upload.name}, ${Date.now()})`;
+      values (${upload.name}, ${createdAt})`;
+    this.broadcastMessage({ type: "upload_complete", name: upload.name, createdAt });
   }
 
   @callable()
@@ -292,13 +308,7 @@ export class OrganizationAgent extends AIChatAgent<Env> {
     workflowId: string,
     progress: { status: "pending" | "approved" | "rejected"; message: string },
   ): Promise<void> {
-    this.broadcast(
-      JSON.stringify({
-        type: "workflow_progress",
-        workflowId,
-        progress,
-      }),
-    );
+    this.broadcastMessage({ type: "workflow_progress", workflowId, progress });
   }
 
   // eslint-disable-next-line @typescript-eslint/require-await
@@ -307,13 +317,7 @@ export class OrganizationAgent extends AIChatAgent<Env> {
     workflowId: string,
     result?: { approved: boolean },
   ): Promise<void> {
-    this.broadcast(
-      JSON.stringify({
-        type: "workflow_complete",
-        workflowId,
-        result,
-      }),
-    );
+    this.broadcastMessage({ type: "workflow_complete", workflowId, result });
   }
 
   // eslint-disable-next-line @typescript-eslint/require-await
@@ -322,13 +326,7 @@ export class OrganizationAgent extends AIChatAgent<Env> {
     workflowId: string,
     error: string,
   ): Promise<void> {
-    this.broadcast(
-      JSON.stringify({
-        type: "workflow_error",
-        workflowId,
-        error,
-      }),
-    );
+    this.broadcastMessage({ type: "workflow_error", workflowId, error });
   }
 
   @callable()
@@ -342,13 +340,7 @@ export class OrganizationAgent extends AIChatAgent<Env> {
       { metadata: { title, description } },
     );
 
-    this.broadcast(
-      JSON.stringify({
-        type: "approval_requested",
-        workflowId,
-        title,
-      }),
-    );
+    this.broadcastMessage({ type: "approval_requested", workflowId, title });
 
     return {
       id: workflowId,

@@ -1,4 +1,5 @@
 import type { OrganizationAgent } from "@/organization-agent";
+import { organizationMessageSchema } from "@/organization-agent";
 import { useForm } from "@tanstack/react-form";
 import { useMutation } from "@tanstack/react-query";
 import {
@@ -75,18 +76,15 @@ function RouteComponent() {
     agent: "organization-agent",
     name: organizationId,
     onMessage: (event) => {
-      try {
-        const data = JSON.parse(String(event.data)) as { type?: string };
-        if (
-          data.type === "workflow_progress" ||
-          data.type === "workflow_complete" ||
-          data.type === "workflow_error" ||
-          data.type === "approval_requested"
-        ) {
-          void router.invalidate();
-        }
-      } catch {
-        // ignore non-JSON messages
+      const result = organizationMessageSchema.safeParse(JSON.parse(String(event.data)));
+      if (!result.success) return;
+      if (
+        result.data.type === "workflow_progress" ||
+        result.data.type === "workflow_complete" ||
+        result.data.type === "workflow_error" ||
+        result.data.type === "approval_requested"
+      ) {
+        void router.invalidate();
       }
     },
   });

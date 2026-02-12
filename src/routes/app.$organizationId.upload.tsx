@@ -1,3 +1,5 @@
+import type { OrganizationAgent, OrganizationMessage } from "@/organization-agent";
+import { organizationMessageSchema } from "@/organization-agent";
 import { invariant } from "@epic-web/invariant";
 import { useForm } from "@tanstack/react-form";
 import { useMutation } from "@tanstack/react-query";
@@ -7,7 +9,9 @@ import {
   useRouter,
 } from "@tanstack/react-router";
 import { createServerFn, useServerFn } from "@tanstack/react-start";
-import { AlertCircle } from "lucide-react";
+import { useAgent } from "agents/react";
+import { AlertCircle, Check, CircleDot, Info, MessageSquare, XCircle } from "lucide-react";
+import * as React from "react";
 import * as z from "zod";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
@@ -95,9 +99,24 @@ export const Route = createFileRoute("/app/$organizationId/upload")({
 });
 
 function RouteComponent() {
+  const { organizationId } = Route.useParams();
   const isHydrated = useHydrated();
   const uploads = Route.useLoaderData();
   const router = useRouter();
+  const [messages, setMessages] = React.useState<OrganizationMessage[]>([]);
+
+  useAgent<OrganizationAgent, unknown>({
+    agent: "organization-agent",
+    name: organizationId,
+    onMessage: (event) => {
+      const result = organizationMessageSchema.safeParse(JSON.parse(String(event.data)));
+      if (!result.success) return;
+      setMessages((prev) => [result.data, ...prev]);
+      if (result.data.type === "upload_complete") {
+        void router.invalidate();
+      }
+    },
+  });
   const uploadServerFn = useServerFn(uploadFile);
   const uploadMutation = useMutation({
     mutationFn: (formData: FormData) => uploadServerFn({ data: formData }),
@@ -260,6 +279,70 @@ function RouteComponent() {
           </CardContent>
         </Card>
       )}
+
+      <Messages messages={messages} />
     </div>
   );
+}
+
+function Messages({ messages }: { messages: OrganizationMessage[] }) {
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle className="flex items-center gap-2">
+          <MessageSquare className="size-5" />
+          Messages
+        </CardTitle>
+        <CardDescription>Real-time events from the agent</CardDescription>
+      </CardHeader>
+      <CardContent>
+        {messages.length === 0 ? (
+          <p className="text-muted-foreground text-sm">No messages yet</p>
+        ) : (
+          <ul className="divide-y">
+            {messages.map((msg, i) => (
+              <li key={i} className="flex items-center gap-3 py-2">
+                <MessageIcon type={msg.type} />
+                <span className="text-sm">{formatMessage(msg)}</span>
+              </li>
+            ))}
+          </ul>
+        )}
+      </CardContent>
+    </Card>
+  );
+}
+
+function MessageIcon({ type }: { type: OrganizationMessage["type"] }) {
+  switch (type) {
+    case "upload_complete":
+      return <Check className="text-green-600 size-4" />;
+    case "upload_error":
+      return <XCircle className="text-destructive size-4" />;
+    case "workflow_progress":
+      return <CircleDot className="text-yellow-600 size-4" />;
+    case "workflow_complete":
+      return <Check className="text-green-600 size-4" />;
+    case "workflow_error":
+      return <XCircle className="text-destructive size-4" />;
+    case "approval_requested":
+      return <Info className="text-blue-600 size-4" />;
+  }
+}
+
+function formatMessage(msg: OrganizationMessage): string {
+  switch (msg.type) {
+    case "upload_complete":
+      return `${msg.name} uploaded`;
+    case "upload_error":
+      return `${msg.name} failed: ${msg.error}`;
+    case "workflow_progress":
+      return msg.progress.message;
+    case "workflow_complete":
+      return `Workflow ${msg.result?.approved ? "approved" : "completed"}`;
+    case "workflow_error":
+      return `Workflow error: ${msg.error}`;
+    case "approval_requested":
+      return `Approval requested: ${msg.title}`;
+  }
 }
