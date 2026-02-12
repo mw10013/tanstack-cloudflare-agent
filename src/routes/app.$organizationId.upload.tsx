@@ -83,7 +83,7 @@ const getUploads = createServerFn({ method: "GET" })
     );
     const id = env.ORGANIZATION_AGENT.idFromName(organizationId);
     const stub = env.ORGANIZATION_AGENT.get(id);
-    return (await stub.listUploads()) as unknown as {
+    return (await stub.getUploads()) as unknown as {
       name: string;
       createdAt: number;
     }[];

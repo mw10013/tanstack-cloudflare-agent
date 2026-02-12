@@ -188,7 +188,7 @@ export class OrganizationAgent extends AIChatAgent<Env> {
   }
 
   @callable()
-  listUploads() {
+  getUploads() {
     return this.sql`select * from Upload order by createdAt desc`;
   }
 
