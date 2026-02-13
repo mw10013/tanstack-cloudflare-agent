@@ -33,6 +33,7 @@ import { Route as AppOrganizationIdChatRouteImport } from './routes/app.$organiz
 import { Route as AppOrganizationIdBillingRouteImport } from './routes/app.$organizationId.billing'
 import { Route as AppOrganizationIdAgentRouteImport } from './routes/app.$organizationId.agent'
 import { Route as ApiAuthSplatRouteImport } from './routes/api/auth/$'
+import { Route as ApiOrgOrganizationIdUploadImageNameRouteImport } from './routes/api/org.$organizationId.upload-image.$name'
 import { Route as ApiE2eDeleteUserEmailRouteImport } from './routes/api/e2e/delete/user/$email'
 
 const MagicLinkRoute = MagicLinkRouteImport.update({
@@ -159,6 +160,12 @@ const ApiAuthSplatRoute = ApiAuthSplatRouteImport.update({
   path: '/api/auth/$',
   getParentRoute: () => rootRouteImport,
 } as any)
+const ApiOrgOrganizationIdUploadImageNameRoute =
+  ApiOrgOrganizationIdUploadImageNameRouteImport.update({
+    id: '/api/org/$organizationId/upload-image/$name',
+    path: '/api/org/$organizationId/upload-image/$name',
+    getParentRoute: () => rootRouteImport,
+  } as any)
 const ApiE2eDeleteUserEmailRoute = ApiE2eDeleteUserEmailRouteImport.update({
   id: '/api/e2e/delete/user/$email',
   path: '/api/e2e/delete/user/$email',
@@ -190,6 +197,7 @@ export interface FileRoutesByFullPath {
   '/app/$organizationId/workflow': typeof AppOrganizationIdWorkflowRoute
   '/app/$organizationId/': typeof AppOrganizationIdIndexRoute
   '/api/e2e/delete/user/$email': typeof ApiE2eDeleteUserEmailRoute
+  '/api/org/$organizationId/upload-image/$name': typeof ApiOrgOrganizationIdUploadImageNameRoute
 }
 export interface FileRoutesByTo {
   '/login': typeof LoginRoute
@@ -213,6 +221,7 @@ export interface FileRoutesByTo {
   '/app/$organizationId/workflow': typeof AppOrganizationIdWorkflowRoute
   '/app/$organizationId': typeof AppOrganizationIdIndexRoute
   '/api/e2e/delete/user/$email': typeof ApiE2eDeleteUserEmailRoute
+  '/api/org/$organizationId/upload-image/$name': typeof ApiOrgOrganizationIdUploadImageNameRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
@@ -241,6 +250,7 @@ export interface FileRoutesById {
   '/app/$organizationId/workflow': typeof AppOrganizationIdWorkflowRoute
   '/app/$organizationId/': typeof AppOrganizationIdIndexRoute
   '/api/e2e/delete/user/$email': typeof ApiE2eDeleteUserEmailRoute
+  '/api/org/$organizationId/upload-image/$name': typeof ApiOrgOrganizationIdUploadImageNameRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
@@ -269,6 +279,7 @@ export interface FileRouteTypes {
     | '/app/$organizationId/workflow'
     | '/app/$organizationId/'
     | '/api/e2e/delete/user/$email'
+    | '/api/org/$organizationId/upload-image/$name'
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/login'
@@ -292,6 +303,7 @@ export interface FileRouteTypes {
     | '/app/$organizationId/workflow'
     | '/app/$organizationId'
     | '/api/e2e/delete/user/$email'
+    | '/api/org/$organizationId/upload-image/$name'
   id:
     | '__root__'
     | '/_mkt'
@@ -319,6 +331,7 @@ export interface FileRouteTypes {
     | '/app/$organizationId/workflow'
     | '/app/$organizationId/'
     | '/api/e2e/delete/user/$email'
+    | '/api/org/$organizationId/upload-image/$name'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
@@ -329,6 +342,7 @@ export interface RootRouteChildren {
   MagicLinkRoute: typeof MagicLinkRoute
   ApiAuthSplatRoute: typeof ApiAuthSplatRoute
   ApiE2eDeleteUserEmailRoute: typeof ApiE2eDeleteUserEmailRoute
+  ApiOrgOrganizationIdUploadImageNameRoute: typeof ApiOrgOrganizationIdUploadImageNameRoute
 }
 
 declare module '@tanstack/react-router' {
@@ -501,6 +515,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ApiAuthSplatRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/api/org/$organizationId/upload-image/$name': {
+      id: '/api/org/$organizationId/upload-image/$name'
+      path: '/api/org/$organizationId/upload-image/$name'
+      fullPath: '/api/org/$organizationId/upload-image/$name'
+      preLoaderRoute: typeof ApiOrgOrganizationIdUploadImageNameRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/api/e2e/delete/user/$email': {
       id: '/api/e2e/delete/user/$email'
       path: '/api/e2e/delete/user/$email'
@@ -588,6 +609,8 @@ const rootRouteChildren: RootRouteChildren = {
   MagicLinkRoute: MagicLinkRoute,
   ApiAuthSplatRoute: ApiAuthSplatRoute,
   ApiE2eDeleteUserEmailRoute: ApiE2eDeleteUserEmailRoute,
+  ApiOrgOrganizationIdUploadImageNameRoute:
+    ApiOrgOrganizationIdUploadImageNameRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)
