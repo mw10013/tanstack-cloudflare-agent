@@ -12,13 +12,58 @@ Update `src/routes/app.$organizationId.upload.tsx` to:
 
 No Cloudflare Images service usage.
 
-## Decisions (from iteration)
+## Decisions (locked)
 
-- image MIME allowlist: broader set (`image/png`, `image/jpeg`, `image/webp`, `image/gif`)
+- image MIME allowlist: `image/png`, `image/jpeg`, `image/webp`, `image/gif`
 - signed URL TTL: `900` seconds (15 minutes)
 - local development: use proxy path, not presigned URLs
 - same name behavior: keep overwrite semantics (last write wins)
-- image rendering component: native `<img>` (no project image wrapper)
+- image rendering: native `<img>`
+- loader payload: no `thumbnailExpiresAt` field
+
+## Answers To Annotated Questions
+
+### What are the "S3" keys if we do not use AWS?
+
+They are **Cloudflare R2 API credentials**, not AWS account credentials.
+
+Where to get them:
+
+1. Cloudflare Dashboard -> R2 -> Manage R2 API Tokens
+2. Create token with bucket-scoped permissions (`Object Read` is enough for GET signing)
+3. Save generated:
+   - Access Key ID -> `R2_S3_ACCESS_KEY_ID`
+   - Secret Access Key -> `R2_S3_SECRET_ACCESS_KEY`
+
+Rationale: Cloudflare R2 uses an S3-compatible API + SigV4 signing model for presigned URLs.
+
+### Is CORS really required?
+
+Per Cloudflare docs (`refs/cloudflare-docs/src/content/docs/r2/buckets/cors.mdx`): browser-based presigned URL use needs CORS.
+
+Practical nuance:
+
+- plain `<img src="...">` may still render without JS reading response headers/body
+- any `fetch`/XHR usage and reliable cross-origin browser behavior should assume CORS is required
+- plan keeps CORS configuration as required infra step for robustness
+
+### Do we need `thumbnailExpiresAt`?
+
+No. Removed.
+
+- URLs are refreshed on route reload/invalidate
+- UI does not need to compute exact expiry timestamp
+
+### Should DO or server fn generate `thumbnailUrl`?
+
+Server fn/loader should generate it.
+
+Why:
+
+- presigned URLs are request-scoped view data, not durable state
+- avoids persisting expiring URLs in DO storage
+- keeps DO focused on stable metadata (`name`, `createdAt`)
+- keeps signing credentials usage in route/server layer
 
 ## Docs Grounding
 
@@ -30,146 +75,120 @@ Cloudflare refs used:
 - `refs/cloudflare-docs/src/content/docs/r2/get-started/workers-api.mdx`
 - `refs/cloudflare-docs/src/content/docs/r2/buckets/cors.mdx`
 
-Key constraints reflected in plan:
-
-- presigned URLs require S3 API signing and use `<ACCOUNT_ID>.r2.cloudflarestorage.com`
-- local `wrangler dev` uses local R2 simulation and does not support S3 API flows
-- browser usage of presigned URLs requires bucket CORS
-
 ## Current System Notes
 
 From code:
 
 - `src/routes/app.$organizationId.upload.tsx` currently accepts PNG/JPEG/PDF
-- `src/worker.ts` queue consumer reads `customMetadata.organizationId` + `customMetadata.name` from R2 object and calls `stub.onUpload({ name })`
+- `src/worker.ts` queue consumer reads `customMetadata.organizationId` + `customMetadata.name` then calls `stub.onUpload({ name })`
 - `src/organization-agent.ts` stores uploads as `Upload(name, createdAt)`
 
-Implication:
+Constraint:
 
-- we should keep existing R2 `customMetadata` keys unchanged
+- keep existing `customMetadata.organizationId` and `customMetadata.name` unchanged
 
-## aws4fetch Dependency + refs script
+## File-by-File Change Plan
 
-- `aws4fetch` is present in lockfile transitively, not direct dependency in `package.json`
-- plan: add direct dependency pinned to latest available stable via `pnpm view aws4fetch version`
-- plan: add `refs:aws4fetch` script in `package.json` to mirror existing `refs:*` workflow (download source tarball into `refs/aws4fetch`)
+1. `package.json`
+- add direct dependency: `aws4fetch` pinned to latest stable from `pnpm view aws4fetch version`
+- add script `refs:aws4fetch` to download aws4fetch source under `refs/aws4fetch`
 
-## Required Env Vars For Signing
+2. `.env.example`
+- add `R2_S3_ACCESS_KEY_ID`
+- add `R2_S3_SECRET_ACCESS_KEY`
+- add `R2_BUCKET_NAME=uploads`
 
-Existing env already has `CF_ACCOUNT_ID`. For presigned URL generation add:
+3. `wrangler.jsonc`
+- add `R2_BUCKET_NAME` in local + production `vars`
+- do not commit real key values; use placeholders/empty values
 
-What are these S3 keys? where do I get them? i don't have an aws account or s3 bucket.
+4. `src/routes/app.$organizationId.upload.tsx`
+- update client + server validators:
+  - remove PDF
+  - regex `^[A-Za-z_-]+$`
+- add helper to map uploads to thumbnail URL:
+  - local: proxy URL
+  - non-local: presigned GET URL via `aws4fetch`
+- update loader return shape to include `thumbnailUrl`
+- render thumbnail gallery UI with `<img>`
+- refactor layout to two-column top section (form + messages)
 
-- `R2_S3_ACCESS_KEY_ID`
-- `R2_S3_SECRET_ACCESS_KEY`
-- `R2_BUCKET_NAME` (value: `uploads`)
+5. `src/routes/api/...` (new route)
+- add local-only proxy endpoint for image bytes
+- enforce session + org authorization
+- read from `env.R2.get(key)` and return bytes + content type
 
-Where:
+6. `worker-configuration.d.ts`
+- regenerated by `pnpm typecheck` (do not edit manually)
 
-- add to `wrangler.jsonc` (`vars` and `env.production.vars` placeholders)
-- add to `.env.example`
-- regenerate types with `pnpm typecheck` (runs `wrangler types`)
+## Data Contracts
 
-## URL Strategy
+### Existing DO contract (unchanged)
 
-### Production / non-local
+`stub.getUploads()` returns:
 
-- generate presigned GET URLs with `aws4fetch`
-- endpoint format: `https://${env.CF_ACCOUNT_ID}.r2.cloudflarestorage.com/${env.R2_BUCKET_NAME}/${key}?X-Amz-Expires=900`
-- sign with `AwsClient.sign(request, { aws: { signQuery: true } })`
+- `Array<{ name: string; createdAt: number }>`
+
+### Upload route loader contract (updated)
+
+returns:
+
+- `Array<{ name: string; createdAt: number; thumbnailUrl: string }>`
+
+## URL Generation Strategy
+
+### Non-local
+
+- `AwsClient({ service: "s3", region: "auto", accessKeyId, secretAccessKey })`
+- sign request URL:
+  - `https://${env.CF_ACCOUNT_ID}.r2.cloudflarestorage.com/${env.R2_BUCKET_NAME}/${organizationId}/${name}?X-Amz-Expires=900`
+- use `aws: { signQuery: true }`
 
 ### Local
 
-- return app-local proxy URL instead of presigned URL
-- proxy handler fetches object using `env.R2.get(key)` and returns bytes
-- enforce same org auth check before returning bytes
+- return internal app route URL:
+  - `/api/org/${organizationId}/upload-image/${encodeURIComponent(name)}`
+- proxy endpoint returns `env.R2.get(${organizationId}/${name})`
 
-## Local Proxy Details
+## Edge Cases + Handling
 
-Add new route for thumbnail proxy, example:
+- upload name collision: keep current overwrite behavior
+- expired presigned URL while page open: user refresh/invalidate regenerates links
+- object missing from R2 but present in DO list: image shows fallback placeholder; keep row visible
+- unsupported file chosen: blocked by file input `accept` + schema validation
+- org mismatch access attempt on proxy route: return `403`
 
-- `src/routes/api/org.$organizationId.upload-image.$name.tsx` (exact naming flexible)
+## CORS Checklist (non-local)
 
-Behavior:
-
-1. verify session exists
-2. verify `session.session.activeOrganizationId === organizationId`
-3. load `key = ${organizationId}/${name}` from `env.R2`
-4. return `404` if missing
-5. return object body with:
-   - `Content-Type` from `httpMetadata.contentType` (fallback `application/octet-stream`)
-   - `Cache-Control: private, max-age=60`
-   - optional `ETag`
-
-## Route Data Shape Changes
-
-In upload page loader result, return per row:
-
-- `name: string`
-- `createdAt: number`
-- `thumbnailUrl: string`
-- `thumbnailExpiresAt: number | null` (null for local proxy)
-
-i don't think we need expiresAt. or do we? should the agent DO or the server fn generate the thumbnailUrl? and why?
-
-Data source remains `stub.getUploads()` then enrich in server fn before return.
-
-## UI Changes in `src/routes/app.$organizationId.upload.tsx`
-
-### Validation
-
-- client and server schema: remove PDF MIME
-- name rule: `z.string().trim().min(1).regex(/^[A-Za-z_-]+$/)`
-- input copy updates to image-only messaging
-
-### Layout
-
-- top area becomes responsive 2-column grid:
-  - left: upload form card
-  - right: messages card
-- uploads gallery remains below as full-width section
-
-### Thumbnail gallery
-
-- render cards with fixed thumb frame and native `<img>`
-- set `loading="lazy"`
-- use `object-cover`
-- include fallback placeholder on load error
-- retain filename + timestamp text
-
-## CORS Checklist
-
-is cors really necessary? check cloudflare-docs.
-
-For non-local browser display via presigned GET, R2 bucket CORS should include:
+R2 bucket CORS policy should include:
 
 - `AllowedOrigins`: app origin(s)
-- `AllowedMethods`: `GET` (and `HEAD` optional)
-- `AllowedHeaders`: minimal needed for requests
+- `AllowedMethods`: `GET` (and optionally `HEAD`)
+- `AllowedHeaders`: minimal set
 
 ## Implementation Steps
 
-1. Add `aws4fetch` direct dependency and add `refs:aws4fetch` script.
-2. Add new env vars to Wrangler config / env examples.
-3. Update upload route validation + copy to image-only and strict name regex.
-4. Add URL enrichment server fn (presigned for non-local, proxy URL for local).
-5. Add local proxy route for image bytes with org auth guard.
-6. Convert uploads list into thumbnail gallery.
-7. Refactor layout to side-by-side form/messages on desktop.
+1. Add `aws4fetch` direct dep and `refs:aws4fetch` script.
+2. Add signing env vars to `.env.example` and `wrangler.jsonc`.
+3. Update upload validation + UI copy in `src/routes/app.$organizationId.upload.tsx`.
+4. Add URL enrichment logic in upload loader server fn.
+5. Add local image proxy route with auth guard.
+6. Replace uploads list with thumbnail gallery.
+7. Refactor form/messages layout side-by-side on desktop.
 8. Run `pnpm typecheck` and `pnpm lint`.
 
 ## Acceptance Criteria
 
-- selecting PDF is rejected by accept filter + validation
-- invalid names (`a b`, `a/b`, `foo.png`) are rejected
-- valid names (`avatar_main`, `team-photo`) are accepted
-- uploads render image thumbnails
-- desktop layout shows upload form and messages side-by-side
-- local env thumbnails work without remote R2
-- production/staging thumbnails use presigned GET URLs
+- PDF selection/upload rejected
+- invalid names (`a b`, `a/b`, `foo.png`) rejected
+- valid names (`avatar_main`, `team-photo`) accepted
+- uploads display as thumbnails
+- desktop shows form/messages side-by-side
+- local env thumbnails work with proxy route
+- non-local env thumbnails resolve via presigned GET URLs
 
 ## Out of Scope
 
 - Cloudflare Images transforms
-- thumbnail preprocessing pipeline
-- lifecycle cleanup and retention automation
+- generated thumbnail derivatives pipeline
+- object lifecycle cleanup automation
