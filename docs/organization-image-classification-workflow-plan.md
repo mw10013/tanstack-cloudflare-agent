@@ -1,4 +1,4 @@
-# Organization Image Classification Workflow Plan (Iteration 5)
+# Organization Image Classification Workflow Plan (Iteration 6)
 
 ## Goal
 
@@ -404,6 +404,7 @@ Source:
 
 - `refs/agents/packages/agents/src/index.ts:1890+`
 - `worker-configuration.d.ts:10911` (`id` must be unique within workflow)
+- `refs/cloudflare-docs/src/content/docs/workflows/build/workers-api.mdx:278`
 
 Actual code path summary:
 
@@ -423,7 +424,20 @@ Implications:
 - `WorkflowInstanceCreateOptions.id` is documented in generated types as unique per workflow.
 - We do not depend on tracking insert for correctness of our own `Upload` table state machine.
 
-I asked you to fucking find out the behavior of `workflow.create` by scanning the cloudflare-docs and showing me evidence. where is the fucking evidence? We need to know the exact error it throws if the workflow id already exists and is running. DO IT.
+### `workflow.create` Evidence
+
+Documented behavior:
+
+- `create(...)` throws if provided ID is already used by an existing instance still within retention window.
+  - `refs/cloudflare-docs/src/content/docs/workflows/build/workers-api.mdx:278`
+- `createBatch(...)` is idempotent and skips IDs already in use.
+  - `refs/cloudflare-docs/src/content/docs/workflows/build/workers-api.mdx:332`
+
+Not documented:
+
+- exact error type/class/message for duplicate-ID `create(...)` failure.
+
+Therefore, ingest logic must be behavior-based (existence/status check), not message-fragile.
 
 ### Duplicate-ID / Tracking Repair Policy
 
@@ -458,11 +472,28 @@ Rationale:
 1. Try `runWorkflow("OrganizationWorkflow", payload, { id: workflowId, metadata })`.
 2. If success: continue.
 3. If error:
-   - if message indicates duplicate/already-tracked/already-exists, treat as idempotent success.
-   - else rethrow so queue retries.
+   - call `getWorkflowStatus("OrganizationWorkflow", workflowId)`.
+
+HOLD ON. If getWorkflowStatus is agents implementation then this will likely not work. let's see the code from refs/agents. Also, if `runWorkflow` throws an error, we don't know if that error indicates the workflow is already running or something else. We need a way using the cloudflare workflows to determine if a workflow id is running, not an agents way, i think.
+
+   - if status lookup succeeds:
+     - ensure tracking row exists, inserting if missing.
+     - continue as idempotent success.
+   - if status lookup fails, rethrow so queue retries.
 4. Always keep stale-guarded DB updates by `name + eventId`.
 
 This policy avoids duplicate logical work and preserves retry behavior for real failures.
+
+### Pre-Implementation Probe
+
+Before coding production handler, run one local probe:
+
+1. Call `env.OrganizationWorkflow.create({ id: "dup-test", params })`.
+2. Call it again with same id.
+3. Log thrown object shape (`name`, `message`, own properties).
+4. Record observed shape in this doc.
+
+This is for observability only; runtime logic should still use the behavior-based fallback above.
 
 ## File-Level Contracts (exact signatures)
 
