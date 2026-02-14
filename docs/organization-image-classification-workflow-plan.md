@@ -66,8 +66,7 @@ Yes, policy is:
 - In this plan, `eTag` is used only as a version discriminator for idempotency with `key`.
 - We derive event identity as `sha256("${key}:${eTag}")`.
 - If same `name` is overwritten, new object version should produce a different `eTag`, therefore a different `eventId`.
-
-Why do we need sha256?
+- We use `sha256` to keep IDs fixed-length, ASCII-safe, and short enough for workflow id composition.
 
 ## Flow Diagram (MVP)
 
@@ -386,8 +385,114 @@ Important:
 
 In this plan, "already running/created" is determined by attempting the same deterministic id again. If it already exists, the second start is treated as idempotent success for the same event.
 
-I need to see the actual code for `runWorkflow`.
-Does `workflow.create` throw an error if the id already exists? If it does, that would be good. And then would we need to upsert tracking row to be sure we're really tracking it. Isn't this agents implementation code so we can really get into it? This still seems very loose.
+### Observed Internal Sequence
+
+From `refs/agents/packages/agents/src/index.ts:1895` onward:
+
+1. Picks `workflowId` (`options.id ?? nanoid()`).
+2. Calls `workflow.create({ id: workflowId, params })`.
+3. Inserts tracking row in `cf_agents_workflows`.
+
+Goddamit. Put the fucking code for `runWorkflow` in here so I can see it. Also, does `workflow.create` throw exception? show me fucking evidence. We don't know if the tracking row was actually inserted.
+
+Interpretation:
+
+- Duplicate handling is guaranteed for tracking-row unique constraint.
+- Duplicate-id behavior at `workflow.create` is runtime-owned; treat as possible error path and handle idempotently in ingest.
+
+### Ingest Error-Handling Policy (strict)
+
+`ingestUploadEvent` start logic:
+
+1. Try `runWorkflow("OrganizationWorkflow", payload, { id: workflowId, metadata })`.
+2. If success: continue.
+3. If error:
+   - if message indicates duplicate/already-tracked/already-exists, treat as idempotent success.
+   - else rethrow so queue retries.
+4. Always keep stale-guarded DB updates by `name + eventId`.
+
+This policy avoids duplicate logical work and preserves retry behavior for real failures.
+
+## File-Level Contracts (exact signatures)
+
+### `src/organization-agent.ts`
+
+```ts
+export interface UploadRow {
+  name: string;
+  eventId: string;
+  workflowId: string;
+  status: "queued" | "running" | "classified" | "failed";
+  classificationLabel: string | null;
+  classificationScore: number | null;
+  error: string | null;
+  createdAt: number;
+  updatedAt: number;
+  completedAt: number | null;
+}
+
+export interface IngestUploadEventInput {
+  name: string;
+  key: string;
+  eTag: string;
+}
+
+export interface ClassificationWorkflowPayload {
+  name: string;
+  key: string;
+  eventId: string;
+}
+```
+
+Methods:
+
+```ts
+ingestUploadEvent(input: IngestUploadEventInput): Promise<{ eventId: string; workflowId: string }>;
+persistClassificationSuccess(input: { name: string; eventId: string; label: string; score: number }): Promise<void>;
+persistClassificationFailure(input: { name: string; eventId: string; error: string }): Promise<void>;
+getUploads(): UploadRow[];
+```
+
+Workflow class contract:
+
+```ts
+export class OrganizationWorkflow extends AgentWorkflow<
+  OrganizationAgent,
+  ClassificationWorkflowPayload,
+  { status: "running" | "classified" | "failed"; step: "load-image" | "classify-image" | "persist-result"; message: string }
+> {}
+```
+
+### `src/worker.ts`
+
+Queue-to-agent contract:
+
+```ts
+await stub.ingestUploadEvent({
+  name,
+  key: notification.object.key,
+  eTag: notification.object.eTag,
+});
+```
+
+Ack contract:
+
+- `message.ack()` only after ingest returns without throwing.
+
+### `src/routes/app.$organizationId.upload.tsx`
+
+Loader return extension:
+
+```ts
+type UploadListItem = {
+  name: string;
+  createdAt: number;
+  status: "queued" | "running" | "classified" | "failed";
+  classificationLabel: string | null;
+  classificationScore: number | null;
+  thumbnailUrl: string;
+};
+```
 
 ## MVP Decision Lock (to reduce ambiguity)
 
@@ -503,6 +608,3 @@ Does `workflow.create` throw an error if the id already exists? If it does, that
 - Old workflow completion after newer upload => old write ignored.
 - Inject crash after DB upsert before workflow start => redelivery recovers.
 - Force AI failure => row status `failed`, with error.
-
-
-In general, finding it really hard to understand the flow. Perhaps mermaid diagram may be helpful. I can view mermaid in md in vscode.
