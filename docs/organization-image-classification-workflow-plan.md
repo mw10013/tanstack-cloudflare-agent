@@ -465,8 +465,9 @@ Policy in `ingestUploadEvent`:
 1. Call `runWorkflow(..., { id: workflowId })`.
 2. On success, continue.
 3. On error:
-   - verify instance existence via `this.getWorkflowStatus("OrganizationWorkflow", workflowId)`.
-   - if status lookup succeeds:
+   - verify instance existence via workflow binding ground truth:
+     - `await this.env.OrganizationWorkflow.get(workflowId).status()`
+   - if binding status lookup succeeds:
      - ensure tracking row exists:
        - if `this.getWorkflow(workflowId)` is missing, insert row into `cf_agents_workflows` directly with:
          - `workflow_id = workflowId`
@@ -474,15 +475,14 @@ Policy in `ingestUploadEvent`:
          - `status = 'queued'`
          - `metadata` = same JSON as run call
      - continue as idempotent success
-   - if status lookup fails, rethrow so queue retries.
-
-
- You disappoint me. You are relying too much on agents workflow methods which are not ground truth for fault tolerance. Need to use the fucking workflow binding to find ground truth. See https://developers.cloudflare.com/workflows/build/workers-api/#workflow  
+   - if binding status lookup fails, rethrow so queue retries.
 
 Rationale:
 
-- `getWorkflowStatus()` calls `_updateWorkflowTracking()`, which only updates existing rows.
-  - `refs/agents/packages/agents/src/index.ts:2735`
+- Workflow binding is authoritative for existence/status.
+  - `refs/cloudflare-docs/src/content/docs/workflows/build/workers-api.mdx#workflow`
+- Agent tracking table is local projection/cache, not authoritative runtime state.
+- `getWorkflowStatus()` in agents updates local tracking and is not needed for existence proof.
 - Direct repair insert is required if row was never inserted.
 - This is intentional coupling to agents internal table schema for durability.
 
@@ -493,14 +493,24 @@ Rationale:
 1. Try `runWorkflow("OrganizationWorkflow", payload, { id: workflowId, metadata })`.
 2. If success: continue.
 3. If error:
-   - call `getWorkflowStatus("OrganizationWorkflow", workflowId)`.
-   - if status lookup succeeds:
+   - call binding ground truth:
+     - `await this.env.OrganizationWorkflow.get(workflowId).status()`
+   - if binding status lookup succeeds:
      - ensure tracking row exists, inserting if missing.
      - continue as idempotent success.
-   - if status lookup fails, rethrow so queue retries.
+   - if binding status lookup fails, rethrow so queue retries.
 4. Always keep stale-guarded DB updates by `name + eventId`.
 
 This policy avoids duplicate logical work and preserves retry behavior for real failures.
+
+### Ingest Decision Table
+
+| Step | Outcome | Action |
+|---|---|---|
+| `runWorkflow(id)` | success | mark running, return success |
+| `runWorkflow(id)` | throws | call `env.OrganizationWorkflow.get(id).status()` |
+| `get(id).status()` | success | repair missing tracking row if needed, return success |
+| `get(id).status()` | throws | rethrow original/combined error so queue retries |
 
 ### Pre-Implementation Probe
 
