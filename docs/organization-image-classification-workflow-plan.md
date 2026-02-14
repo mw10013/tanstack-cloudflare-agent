@@ -57,7 +57,57 @@ Yes, policy is:
 - Duplicate deliveries of the same event do not create extra workflows.
 - Multiple real uploads to same `name` (different `eTag`) each get their own workflow, but only latest event can win final row for that `name`.
 
-Need to define eTag and its characteristics. I don't know what an eTag is and where it comes from.
+## `eTag` Definition
+
+`eTag` here is the object entity tag provided by R2 for an object version, and is included in the R2 notification body and `head()` result.
+
+- Source in queue notification format: `object.eTag`
+  - `refs/cloudflare-docs/src/content/docs/r2/buckets/event-notifications.mdx`
+- In this plan, `eTag` is used only as a version discriminator for idempotency with `key`.
+- We derive event identity as `sha256("${key}:${eTag}")`.
+- If same `name` is overwritten, new object version should produce a different `eTag`, therefore a different `eventId`.
+
+Why do we need sha256?
+
+## Flow Diagram (MVP)
+
+```mermaid
+flowchart TD
+  U[User Upload] --> R2[R2 put object key org/name]
+  R2 --> Q[R2 event notification]
+  Q --> C[Queue consumer]
+  C --> H[R2 head key]
+  H --> A[Agent ingestUploadEvent name key eTag]
+  A --> DB1[(Upload table upsert queued)]
+  A --> WF[runWorkflow with deterministic workflowId]
+  WF --> DB2[(Upload status running)]
+  A --> ACK[ack queue message]
+  WF --> W1[Workflow step load-image]
+  W1 --> W2[Workflow step classify-image resnet50]
+  W2 --> W3[Workflow step persist-result]
+  W3 --> DB3[(Upload classified or failed)]
+```
+
+## Crash/Retry Diagram (Critical Window)
+
+```mermaid
+sequenceDiagram
+  participant C as Queue Consumer
+  participant A as Agent
+  participant W as Workflow Engine
+  participant Q as Queue
+
+  C->>A: ingestUploadEvent(name,key,eTag)
+  A->>A: upsert Upload(name,eventId,workflowId,status=queued)
+  A->>W: runWorkflow(id=workflowId)
+  Note over A: crash before ack
+  Q-->>C: redeliver same message
+  C->>A: ingestUploadEvent(name,key,eTag)
+  A->>W: runWorkflow(id=workflowId) again
+  Note over A,W: same deterministic id prevents second instance
+  A-->>C: success
+  C->>Q: ack
+```
 
 ## Approaches Considered
 
@@ -315,7 +365,58 @@ So no periodic reconciliation is required to solve this correctness problem.
 
 Operational reconciliation can still be added later for observability of stuck rows, but it is not part of MVP correctness.
 
-Need details on `runWorkflow`. Is that an agents implementation? Would be helpful to see the code since its behavior is so critical. Is it atomic? How can it kick off a workflow and remmember that it kicked it off in a fault tolerant way? Like how exactly does it determine that the workflow is running already. 
+## `runWorkflow` Behavior (Critical Detail)
+
+Yes, this is `agents` library behavior.
+
+Source:
+- `refs/agents/packages/agents/src/index.ts:1890+`
+
+Operationally:
+
+1. `workflowId = options.id ?? nanoid()`
+2. Calls `workflow.create({ id: workflowId, params: ... })`
+3. Then inserts tracking row in `cf_agents_workflows`
+
+Important:
+
+- Not atomic across create + local tracking insert.
+- This is exactly why queue redelivery + deterministic `workflowId` are used for recovery.
+- Correctness does not rely on tracking row insert succeeding first.
+
+In this plan, "already running/created" is determined by attempting the same deterministic id again. If it already exists, the second start is treated as idempotent success for the same event.
+
+I need to see the actual code for `runWorkflow`.
+Does `workflow.create` throw an error if the id already exists? If it does, that would be good. And then would we need to upsert tracking row to be sure we're really tracking it. Isn't this agents implementation code so we can really get into it? This still seems very loose.
+
+## MVP Decision Lock (to reduce ambiguity)
+
+1. Keep class name `OrganizationWorkflow` and repurpose to classification.
+2. Use approach B only (single `Upload` table).
+3. Store top-1 label and score only.
+4. No reconciliation job in MVP.
+5. No manual retry API in MVP.
+
+## Ordered Implementation Tasks (MVP)
+
+1. Update `OrganizationWorkflow` to classification steps only.
+2. Replace `Upload` table schema in agent constructor.
+3. Add `ingestUploadEvent({ name, key, eTag })` in agent.
+4. Implement deterministic `eventId/workflowId` derivation.
+5. In ingest: upsert row `queued`, start workflow with deterministic id, mark `running`.
+6. Update queue consumer to call `ingestUploadEvent`.
+7. Ensure queue `ack()` only on ingest success.
+8. Add stale-guarded persist methods for success/failure.
+9. Update `getUploads()` return shape to include status/label/score.
+10. Update upload route UI types to accept new fields.
+
+## Acceptance Criteria (MVP)
+
+1. Duplicate delivery of same queue message does not create second logical workflow for same event.
+2. Two uploads with same `name` and different `eTag` result in final row representing only newest event.
+3. Old workflow completion cannot overwrite newer row (`0 rows updated` path).
+4. Crash after upsert and before ack recovers via redelivery without violating invariant #1.
+5. `Upload` row transitions are only: `queued -> running -> classified|failed`.
 
 ## Scope Split
 
