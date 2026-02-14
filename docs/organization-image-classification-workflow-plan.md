@@ -1,4 +1,4 @@
-# Organization Image Classification Workflow Plan (Iteration 2)
+# Organization Image Classification Workflow Plan (Iteration 3)
 
 ## Goal
 
@@ -42,24 +42,109 @@ Remove human approval behavior from `OrganizationWorkflow` as part of this work.
 4. Old workflow result must not overwrite newer upload state.
 5. Queue message is acked only after durable ingest + workflow dispatch outcome is known.
 
+## Temporal Semantics
+
+Same `name` can be uploaded multiple times quickly.
+
+- We do not require FIFO completion across workflows.
+- We do require latest-write-wins per `name`.
+- Definition of latest: row with latest `eventId` currently attached to `name`.
+- Any completion for older `eventId` must be ignored.
+
+Does this mean that we kick off a workflow for every r2 notification?
+
 ## Approaches Considered
 
 ## A) Event History Table + Projection Table
 
-- Keep immutable event rows (`uploadEvent`) plus current row (`uploadCurrent`).
-- Strong auditability and replay.
-- More schema and query complexity than needed now.
+Two tables.
 
-Flesh this approach out. I don't understand it.
+- `UploadEvent`: immutable, one row per R2 event (append-only).
+- `UploadCurrent`: one row per `name` (current state for UI/read path).
+
+Example shape:
+
+```sql
+create table if not exists UploadEvent (
+  id text primary key, -- eventId
+  name text not null,
+  workflowId text not null unique,
+  status text not null check (status in ('queued', 'running', 'classified', 'failed')),
+  classificationLabel text,
+  classificationScore real,
+  error text,
+  createdAt integer not null,
+  updatedAt integer not null,
+  completedAt integer
+);
+
+create table if not exists UploadCurrent (
+  name text primary key,
+  latestEventId text not null,
+  latestWorkflowId text not null,
+  status text not null check (status in ('queued', 'running', 'classified', 'failed')),
+  classificationLabel text,
+  classificationScore real,
+  error text,
+  updatedAt integer not null
+);
+```
+
+Algorithm:
+
+1. Ingest writes/updates `UploadEvent(id=eventId)`.
+2. Ingest upserts `UploadCurrent(name=...)` to point to this `eventId`.
+3. Workflow completion updates `UploadEvent` by `eventId`.
+4. Also updates `UploadCurrent` with guard `where name=? and latestEventId=?`.
+
+Pros:
+
+- Full history, easier debugging and audits.
+- Replay/rebuild `UploadCurrent` possible.
+
+Cons:
+
+- More write/query complexity.
+- More code, more moving parts now.
 
 ## B) Single Current-State Row per `name` + Event Idempotency (Recommended)
 
-- One row per `name`, track only latest upload/event/workflow/classification.
-- Generate deterministic ids from event payload.
-- Enforce stale-write guards on workflow completion.
-- Minimal schema, matches overwrite semantics.
+One table only, row is current snapshot for each `name`.
 
-Flesh this approach out. I don't understand it.
+```sql
+create table if not exists Upload (
+  name text primary key,
+  eventId text not null unique,
+  workflowId text not null unique,
+  status text not null check (status in ('queued', 'running', 'classified', 'failed')),
+  classificationLabel text,
+  classificationScore real,
+  error text,
+  createdAt integer not null,
+  updatedAt integer not null,
+  completedAt integer
+);
+```
+
+Algorithm:
+
+1. Queue event -> compute deterministic `eventId` + `workflowId`.
+2. Upsert row by `name`, replacing previous snapshot.
+3. Start workflow with deterministic `workflowId`.
+4. Workflow completion updates row with stale guard:
+   - `where name=? and eventId=?`
+5. If `0 rows updated`, completion was old and is ignored.
+
+Pros:
+
+- Minimal schema.
+- Matches overwrite semantics directly.
+- Smallest implementation footprint.
+
+Cons:
+
+- No full history.
+- Harder postmortem if you need per-event timeline later.
 
 ## C) Workflow-First then DB write
 
@@ -69,7 +154,7 @@ Flesh this approach out. I don't understand it.
 
 ## Recommended Design
 
-Use approach B.
+Use approach B now. If we need history, migrate to approach A later.
 
 ### Deterministic IDs
 
@@ -92,14 +177,11 @@ create table if not exists Upload (
   status text not null check (status in ('queued', 'running', 'classified', 'failed')),
   classificationLabel text,
   classificationScore real,
-  classificationModel text,
   error text,
   createdAt integer not null,
   updatedAt integer not null,
   completedAt integer
 );
-
-I don't think we need classificationModel.
 
 create index if not exists idx_upload_status on Upload (status);
 create index if not exists idx_upload_updatedAt on Upload (updatedAt desc);
@@ -122,7 +204,7 @@ Pruned intentionally:
    - reset classification/error fields
 7. Agent starts workflow with deterministic `workflowId`.
    - if duplicate workflow/tracking error: treat as already-started success
-8. Agent sets `status='running'` for this `name` only when `eventId` still matches.
+8. Agent sets `status='running'` only with guard `where name=? and eventId=?`.
 9. Queue handler `ack()` message.
 10. Workflow runs:
     - `step.do("load-image")` from R2 using `key`
@@ -131,6 +213,61 @@ Pruned intentionally:
 11. Agent persist methods always include stale guard:
     - update only `where name = ? and eventId = ?`
     - if 0 rows changed, result is stale and ignored
+
+## Concrete Write Rules (SQL-level)
+
+## Ingest Upsert (replace current snapshot)
+
+```sql
+insert into Upload (
+  name, eventId, workflowId, status,
+  classificationLabel, classificationScore, error,
+  createdAt, updatedAt, completedAt
+) values (?, ?, ?, 'queued', null, null, null, ?, ?, null)
+on conflict(name) do update set
+  eventId = excluded.eventId,
+  workflowId = excluded.workflowId,
+  status = 'queued',
+  classificationLabel = null,
+  classificationScore = null,
+  error = null,
+  updatedAt = excluded.updatedAt,
+  completedAt = null;
+```
+
+## Mark Running
+
+```sql
+update Upload
+set status = 'running', updatedAt = ?
+where name = ? and eventId = ?;
+```
+
+## Mark Classified (stale-safe)
+
+```sql
+update Upload
+set
+  status = 'classified',
+  classificationLabel = ?,
+  classificationScore = ?,
+  error = null,
+  updatedAt = ?,
+  completedAt = ?
+where name = ? and eventId = ?;
+```
+
+## Mark Failed (stale-safe)
+
+```sql
+update Upload
+set
+  status = 'failed',
+  error = ?,
+  updatedAt = ?,
+  completedAt = ?
+where name = ? and eventId = ?;
+```
 
 ## Stale Completion Protection (critical)
 
@@ -156,6 +293,22 @@ Guard:
    - same `eventId`/`workflowId`; no duplicate logical work.
 5. Workflow retries:
    - durable writes only in `step.do`.
+
+## Reconciliation Strategy (for rare workflow-create gap)
+
+`runWorkflow()` does create first, then tracking insert in agent internals. In rare crash windows, workflow might exist while local row is still `queued`.
+
+Mitigation:
+
+1. Deterministic `workflowId` makes retries safe.
+2. Add lightweight periodic reconciliation in agent:
+   - query rows with `status in ('queued', 'running')` and `updatedAt < now - 2m`
+   - check workflow status via `getWorkflow(workflowId)` / `getWorkflowStatus(...)`
+   - repair row status if needed
+
+This is optional for MVP but closes long-tail stuck states.
+
+I'm confused here. If this happens, I would think queues would deliver the notification again to retry. And in that case, two workflows would be run instead of one? That's not desired behavior but maybe we have to live with it? I'm not understanding why we would still need this lightweight periodic reconcilation. 
 
 ## Implementation Changes
 
@@ -215,6 +368,7 @@ Guard:
 1. Keep class name `OrganizationWorkflow` for classification vs add dedicated `OrganizationImageClassificationWorkflow`.
 2. Keep top-1 only vs store full top-k JSON later.
 3. Add manual retry endpoint for `failed` rows now vs later.
+4. Add reconciliation in MVP vs phase 2.
 
 ## Validation Checklist
 
@@ -223,4 +377,3 @@ Guard:
 - Old workflow completion after newer upload => old write ignored.
 - Inject crash after DB upsert before workflow start => redelivery recovers.
 - Force AI failure => row status `failed`, with error.
-
