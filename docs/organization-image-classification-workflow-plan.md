@@ -371,34 +371,25 @@ Yes, this is `agents` library behavior.
 Source:
 - `refs/agents/packages/agents/src/index.ts:1890+`
 
-Operationally:
+Actual code path summary:
 
-1. `workflowId = options.id ?? nanoid()`
-2. Calls `workflow.create({ id: workflowId, params: ... })`
-3. Then inserts tracking row in `cf_agents_workflows`
+```ts
+const workflowId = options?.id ?? nanoid();
+const instance = await workflow.create({ id: workflowId, params: augmentedParams });
+this.sql`insert into cf_agents_workflows (...) values (...)`;
+```
 
-Important:
+Implications:
 
-- Not atomic across create + local tracking insert.
-- This is exactly why queue redelivery + deterministic `workflowId` are used for recovery.
-- Correctness does not rely on tracking row insert succeeding first.
+- `create` and tracking insert are two separate operations (not atomic).
+- Tracking insert has unique constraint handling in `agents` (`Workflow with ID "..." is already being tracked`).
+- Behavior of `workflow.create` for duplicate IDs is runtime-defined. Treat any duplicate/already-exists style error as idempotent success for same `eventId`.
+- We do not depend on tracking insert for correctness of our own `Upload` table state machine.
 
-In this plan, "already running/created" is determined by attempting the same deterministic id again. If it already exists, the second start is treated as idempotent success for the same event.
 
-### Observed Internal Sequence
+Fucking find out the behavior of `workflow.create`. Scan cloudflare-docs and include evidence here. Stop fucking waving your hands about this. You don't know what the behavior is so stop making guesses.
 
-From `refs/agents/packages/agents/src/index.ts:1895` onward:
-
-1. Picks `workflowId` (`options.id ?? nanoid()`).
-2. Calls `workflow.create({ id: workflowId, params })`.
-3. Inserts tracking row in `cf_agents_workflows`.
-
-Goddamit. Put the fucking code for `runWorkflow` in here so I can see it. Also, does `workflow.create` throw exception? show me fucking evidence. We don't know if the tracking row was actually inserted.
-
-Interpretation:
-
-- Duplicate handling is guaranteed for tracking-row unique constraint.
-- Duplicate-id behavior at `workflow.create` is runtime-owned; treat as possible error path and handle idempotently in ingest.
+We don't want the fucking tracking insert to be missing if its workflow is running. We don't want to be sloppy and corrupt data.
 
 ### Ingest Error-Handling Policy (strict)
 
@@ -522,77 +513,6 @@ type UploadListItem = {
 3. Old workflow completion cannot overwrite newer row (`0 rows updated` path).
 4. Crash after upsert and before ack recovers via redelivery without violating invariant #1.
 5. `Upload` row transitions are only: `queued -> running -> classified|failed`.
-
-## Scope Split
-
-## MVP (Implement Now)
-
-1. Replace approval workflow logic with image-classification workflow.
-2. Implement approach B single-table schema.
-3. Deterministic `eventId` and `workflowId`.
-4. Queue consumer calls `ingestUploadEvent({ name, key, eTag })`.
-5. Ack queue message only after ingest returns success.
-6. Stale-write guards on all workflow result writes.
-7. Persist top-1 `classificationLabel` + `classificationScore` only.
-
-## Phase 2 (Optional)
-
-1. Add manual retry endpoint for failed classifications.
-2. Add event history table (approach A) if audit/replay needed.
-3. Add operational watchdog for stale `running` rows if desired.
-
-## Implementation Changes
-
-### 1) Agent (`src/organization-agent.ts`)
-
-- Replace constructor table SQL with new `Upload` schema.
-- Replace `onUpload` with `ingestUploadEvent({ name, key, eTag })`.
-- Add:
-  - `startClassificationWorkflow(...)`
-  - `persistClassificationSuccess({ name, eventId, label, score })`
-  - `persistClassificationFailure({ name, eventId, error })`
-- Convert `OrganizationWorkflow` from approval flow to image classification flow.
-
-### 2) Queue Consumer (`src/worker.ts`)
-
-- Replace `stub.onUpload({ name })` with `stub.ingestUploadEvent({ name, key, eTag })`.
-- Keep `head()` lookup for metadata routing.
-- `ack()` only after ingest returns.
-
-### 3) Upload UI Data (`src/routes/app.$organizationId.upload.tsx`)
-
-- Extend `getUploads()` shape with:
-  - `status`
-  - `classificationLabel`
-  - `classificationScore`
-- Initial UI can stay minimal, but backend should expose fields.
-
-### 4) Workers AI Parse
-
-- Parse response with zod:
-  - `z.array(z.object({ label: z.string(), score: z.number() }))`
-- Use top result only:
-  - `const top = results[0]`
-
-## Suggested Workflow Payload
-
-```ts
-{
-  name: string;
-  key: string;
-  eventId: string;
-}
-```
-
-## Suggested Progress Type
-
-```ts
-{
-  status: "running" | "classified" | "failed";
-  step: "load-image" | "classify-image" | "persist-result";
-  message: string;
-}
-```
 
 ## Open Decisions
 
