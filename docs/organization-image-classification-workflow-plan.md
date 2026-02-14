@@ -1,4 +1,4 @@
-# Organization Image Classification Workflow Plan (Iteration 6)
+# Organization Image Classification Workflow Plan (Iteration 7)
 
 ## Goal
 
@@ -439,6 +439,23 @@ Not documented:
 
 Therefore, ingest logic must be behavior-based (existence/status check), not message-fragile.
 
+### Proven vs Unknown
+
+Proven:
+
+- `create()` throws on duplicate ID in retention window.
+  - `refs/cloudflare-docs/src/content/docs/workflows/build/workers-api.mdx:278`
+- `runWorkflow()` sequence is `create` then tracking insert.
+  - `refs/agents/packages/agents/src/index.ts:1890+`
+- `getWorkflowStatus()` uses the workflow binding (`workflow.get(id).status()`) then updates tracking row.
+  - `refs/agents/packages/agents/src/index.ts:2409`
+- `workflow.get(id)` throws if ID does not exist.
+  - `refs/cloudflare-docs/src/content/docs/workflows/build/workers-api.mdx:349`
+
+Unknown:
+
+- exact runtime error class/message for duplicate-ID `create()`.
+
 ### Duplicate-ID / Tracking Repair Policy
 
 Goal: never leave a running workflow untracked in `cf_agents_workflows`.
@@ -448,15 +465,19 @@ Policy in `ingestUploadEvent`:
 1. Call `runWorkflow(..., { id: workflowId })`.
 2. On success, continue.
 3. On error:
-   - If error indicates duplicate/already-exists/already-tracked:
-     - verify instance exists via `this.getWorkflowStatus("OrganizationWorkflow", workflowId)` (remote status check)
+   - verify instance existence via `this.getWorkflowStatus("OrganizationWorkflow", workflowId)`.
+   - if status lookup succeeds:
      - ensure tracking row exists:
        - if `this.getWorkflow(workflowId)` is missing, insert row into `cf_agents_workflows` directly with:
          - `workflow_id = workflowId`
          - `workflow_name = "OrganizationWorkflow"`
          - `status = 'queued'`
          - `metadata` = same JSON as run call
-   - Otherwise rethrow (queue retries).
+     - continue as idempotent success
+   - if status lookup fails, rethrow so queue retries.
+
+
+ You disappoint me. You are relying too much on agents workflow methods which are not ground truth for fault tolerance. Need to use the fucking workflow binding to find ground truth. See https://developers.cloudflare.com/workflows/build/workers-api/#workflow  
 
 Rationale:
 
@@ -473,9 +494,6 @@ Rationale:
 2. If success: continue.
 3. If error:
    - call `getWorkflowStatus("OrganizationWorkflow", workflowId)`.
-
-HOLD ON. If getWorkflowStatus is agents implementation then this will likely not work. let's see the code from refs/agents. Also, if `runWorkflow` throws an error, we don't know if that error indicates the workflow is already running or something else. We need a way using the cloudflare workflows to determine if a workflow id is running, not an agents way, i think.
-
    - if status lookup succeeds:
      - ensure tracking row exists, inserting if missing.
      - continue as idempotent success.
@@ -611,10 +629,8 @@ type UploadListItem = {
 
 ## Open Decisions
 
-1. Keep class name `OrganizationWorkflow` for classification vs add dedicated `OrganizationImageClassificationWorkflow`.
-2. Keep top-1 only vs store full top-k JSON later.
-3. Add manual retry endpoint for `failed` rows now vs later.
-4. Keep only approach B for now vs build approach A immediately.
+1. Keep top-1 only vs store full top-k JSON later.
+2. Add manual retry endpoint for `failed` rows now vs later.
 
 ## Validation Checklist
 
