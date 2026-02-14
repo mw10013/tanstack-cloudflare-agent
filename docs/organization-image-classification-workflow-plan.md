@@ -1,4 +1,4 @@
-# Organization Image Classification Workflow Plan (Iteration 3)
+# Organization Image Classification Workflow Plan (Iteration 4)
 
 ## Goal
 
@@ -51,7 +51,13 @@ Same `name` can be uploaded multiple times quickly.
 - Definition of latest: row with latest `eventId` currently attached to `name`.
 - Any completion for older `eventId` must be ignored.
 
-Does this mean that we kick off a workflow for every r2 notification?
+Yes, policy is:
+
+- One workflow per unique R2 object event (`key + eTag`).
+- Duplicate deliveries of the same event do not create extra workflows.
+- Multiple real uploads to same `name` (different `eTag`) each get their own workflow, but only latest event can win final row for that `name`.
+
+Need to define eTag and its characteristics. I don't know what an eTag is and where it comes from.
 
 ## Approaches Considered
 
@@ -164,6 +170,7 @@ Use approach B now. If we need history, migrate to approach A later.
 Properties:
 - Duplicate queue deliveries for same event collapse on `eventId`.
 - Retried `runWorkflow(..., { id: workflowId })` is safe.
+- Deterministic `workflowId` prevents multiple workflow instances for same event.
 
 ### Minimal SQLite Schema (camelCase)
 
@@ -294,21 +301,39 @@ Guard:
 5. Workflow retries:
    - durable writes only in `step.do`.
 
-## Reconciliation Strategy (for rare workflow-create gap)
+## Why Reconciliation Is Not Required For This Gap
 
-`runWorkflow()` does create first, then tracking insert in agent internals. In rare crash windows, workflow might exist while local row is still `queued`.
+For the specific create-then-crash window:
 
-Mitigation:
+1. Message is not acked yet.
+2. Queue redelivers.
+3. Ingest recomputes same deterministic `workflowId`.
+4. `runWorkflow(..., { id: workflowId })` attempts same id and does not create a second instance for that event.
+5. Ingest returns success, message is acked.
 
-1. Deterministic `workflowId` makes retries safe.
-2. Add lightweight periodic reconciliation in agent:
-   - query rows with `status in ('queued', 'running')` and `updatedAt < now - 2m`
-   - check workflow status via `getWorkflow(workflowId)` / `getWorkflowStatus(...)`
-   - repair row status if needed
+So no periodic reconciliation is required to solve this correctness problem.
 
-This is optional for MVP but closes long-tail stuck states.
+Operational reconciliation can still be added later for observability of stuck rows, but it is not part of MVP correctness.
 
-I'm confused here. If this happens, I would think queues would deliver the notification again to retry. And in that case, two workflows would be run instead of one? That's not desired behavior but maybe we have to live with it? I'm not understanding why we would still need this lightweight periodic reconcilation. 
+Need details on `runWorkflow`. Is that an agents implementation? Would be helpful to see the code since its behavior is so critical. Is it atomic? How can it kick off a workflow and remmember that it kicked it off in a fault tolerant way? Like how exactly does it determine that the workflow is running already. 
+
+## Scope Split
+
+## MVP (Implement Now)
+
+1. Replace approval workflow logic with image-classification workflow.
+2. Implement approach B single-table schema.
+3. Deterministic `eventId` and `workflowId`.
+4. Queue consumer calls `ingestUploadEvent({ name, key, eTag })`.
+5. Ack queue message only after ingest returns success.
+6. Stale-write guards on all workflow result writes.
+7. Persist top-1 `classificationLabel` + `classificationScore` only.
+
+## Phase 2 (Optional)
+
+1. Add manual retry endpoint for failed classifications.
+2. Add event history table (approach A) if audit/replay needed.
+3. Add operational watchdog for stale `running` rows if desired.
 
 ## Implementation Changes
 
@@ -368,7 +393,7 @@ I'm confused here. If this happens, I would think queues would deliver the notif
 1. Keep class name `OrganizationWorkflow` for classification vs add dedicated `OrganizationImageClassificationWorkflow`.
 2. Keep top-1 only vs store full top-k JSON later.
 3. Add manual retry endpoint for `failed` rows now vs later.
-4. Add reconciliation in MVP vs phase 2.
+4. Keep only approach B for now vs build approach A immediately.
 
 ## Validation Checklist
 
@@ -377,3 +402,6 @@ I'm confused here. If this happens, I would think queues would deliver the notif
 - Old workflow completion after newer upload => old write ignored.
 - Inject crash after DB upsert before workflow start => redelivery recovers.
 - Force AI failure => row status `failed`, with error.
+
+
+In general, finding it really hard to understand the flow. Perhaps mermaid diagram may be helpful. I can view mermaid in md in vscode.
