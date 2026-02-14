@@ -1,336 +1,353 @@
 # R2 Notifications + Queues + Agents + Workflows + Image Classification Research
 
-
-The excerpts with just line number are fucking unhelpful. want to see the excerpt in the md file. I'm not going to fucking chase down the other files
-
 ## Scope
 
-- Cloudflare docs reviewed in `refs/cloudflare-docs/src/content/docs/`
-- App code reviewed: `src/worker.ts`, `src/organization-agent.ts`, `src/routes/app.$organizationId.upload.tsx`, `src/routes/api/org.$organizationId.upload-image.$name.tsx`, `wrangler.jsonc`
-- Goal: design fault-tolerant image classification path for uploads handled by `OrganizationAgent`
+- Cloudflare docs scanned in `refs/cloudflare-docs/src/content/docs/`
+- Codebase scanned in:
+  - `src/worker.ts`
+  - `src/organization-agent.ts`
+  - `src/routes/app.$organizationId.upload.tsx`
+  - `src/routes/api/org.$organizationId.upload-image.$name.tsx`
+  - `wrangler.jsonc`
+- Goal: fault-tolerant image classification path for uploads in `OrganizationAgent`
 
-## Cloudflare doc findings
-
-### R2 event notifications
-
-`refs/cloudflare-docs/src/content/docs/r2/buckets/event-notifications.mdx`
-
-- R2 emits queue messages when bucket data changes.
-  - Excerpt: line 8: "Event notifications send messages to your queue when data in your R2 bucket changes."
-- Event rules support event type + prefix/suffix filtering.
-  - Excerpt: lines 61-68: rules can filter, includes `object-create` and `object-delete`.
-- Queue message body schema is explicit.
-  - Excerpt: lines 72-104 include `account`, `action`, `bucket`, `object.key`, `object.size`, `object.eTag`, `eventTime`.
-- Throughput note is explicit.
-  - Excerpt: line 110: per-queue throughput currently 5,000 msg/s.
-
-  Need more details about eTag and eventTime. What are they exactly? can they be use for idempotency and even ordering?
-
-### R2 consistency/durability
-
-`refs/cloudflare-docs/src/content/docs/r2/reference/consistency.mdx`
-
-- R2 is strongly consistent for read-after-write, metadata updates, deletes, and list.
-  - Excerpt: lines 28-31.
-- Concurrent writes to same key are last-write-wins.
-  - Excerpt: line 38.
-
-`refs/cloudflare-docs/src/content/docs/r2/reference/durability.mdx`
-
-- Durability target is 11 nines.
-  - Excerpt: line 9.
-- Write success requires persistence to disk before success response.
-  - Excerpt: line 19.
-
-### Queues behavior and reliability
-
-`refs/cloudflare-docs/src/content/docs/queues/reference/delivery-guarantees.mdx`
-
-- Delivery is at-least-once by default.
-  - Excerpt: lines 13-15.
-- Duplicate delivery must be handled with idempotency keys.
-  - Excerpt: line 17.
-
-`refs/cloudflare-docs/src/content/docs/queues/reference/how-queues-works.mdx`
-
-- Queue keeps messages until successful consume.
-  - Excerpt: line 24.
-- Delivery order is not guaranteed.
-  - Excerpt: line 26.
-- One active consumer per queue.
-  - Excerpt: line 160.
-
-`refs/cloudflare-docs/src/content/docs/queues/configuration/batching-retries.mdx`
-
-- Defaults: `max_batch_size=10`, `max_batch_timeout=5s`.
-  - Excerpt: lines 22-23.
-- Unacked failure causes full-batch redelivery.
-  - Excerpt: line 141.
-- Explicit `ack()` per message prevents redelivery of successful messages.
-  - Excerpt: lines 58-61.
-- Default retries is 3; then delete or DLQ if configured.
-  - Excerpt: lines 131-134.
-
-`refs/cloudflare-docs/src/content/docs/queues/configuration/dead-letter-queues.mdx`
-
-- DLQ receives messages after retry limit.
-  - Excerpt: lines 10-12.
-- Without DLQ, failed messages after max retries are deleted.
-  - Excerpt: line 12.
-
-`refs/cloudflare-docs/src/content/docs/queues/configuration/local-development.mdx`
-
-- Local queue simulation is supported.
-  - Excerpt: lines 8, 29, 35.
-- Remote dev mode unsupported for queues.
-  - Excerpt: line 67.
-
-### Agents + Workflows model
-
-`refs/cloudflare-docs/src/content/docs/agents/api-reference/agents-api.mdx`
-
-- Agents are server-side classes with state, methods, and client synchronization.
-  - Excerpt: lines 20-21.
-- Agents require Durable Objects.
-  - Excerpt: line 25.
-
-`refs/cloudflare-docs/src/content/docs/agents/api-reference/run-workflows.mdx`
-
-- Agent+Workflow split is explicit: agent for realtime, workflow for durable long tasks.
-  - Excerpt: lines 14-17.
-- Non-durable workflow operations may repeat on retry (`reportProgress`, broadcasts).
-  - Excerpt: lines 157-160.
-- Step methods are durable/idempotent boundaries.
-  - Excerpt: lines 203-215.
-- Agent can start tracked workflows via `runWorkflow()`.
-  - Excerpt: lines 232-246.
-
-`refs/cloudflare-docs/src/content/docs/workflows/build/rules-of-workflows.mdx`
-
-- Steps should be idempotent.
-  - Excerpt: lines 14-17.
-- Do not rely on in-memory state outside steps (hibernation).
-  - Excerpt: lines 123-126.
-- Avoid side effects outside `step.do` unless repetition is acceptable.
-  - Excerpt: lines 218-221.
-- Step names should be deterministic (cache key).
-  - Excerpt: lines 320-323.
-
-`refs/cloudflare-docs/src/content/docs/workflows/build/sleeping-and-retrying.mdx`
-
-- Default step retries: limit 5, exponential backoff, 10 minute timeout.
-  - Excerpt: lines 57-67.
-
-`refs/cloudflare-docs/src/content/docs/workflows/reference/limits.mdx`
-
-- Max 1024 steps/workflow.
-  - Excerpt: line 30.
-- Max persisted state per step 1 MiB, event payload 1 MiB.
-  - Excerpt: lines 26-27.
-- Waiting instances do not count toward concurrency.
-  - Excerpt: lines 56-59.
-
-## Workers AI model research for image classification
-
-### Evidence
-
-`refs/cloudflare-docs/src/content/docs/workers-ai/guides/tutorials/explore-workers-ai-models-using-a-jupyter-notebook.mdx`
-
-- Cloudflare example for image classification uses `@cf/microsoft/resnet-50` with `image=` bytes.
-  - Excerpt: lines 366-380.
-
-`refs/cloudflare-docs/src/content/docs/workers-ai/platform/limits.mdx`
-
-- Image Classification task rate limit: 3000 req/min.
-  - Excerpt: lines 24-27.
-
-`refs/cloudflare-docs/src/content/docs/workers-ai/platform/pricing.mdx`
-
-- Pricing table includes `@cf/microsoft/resnet-50` priced per image.
-  - Excerpt: line 107.
-
-`refs/cloudflare-docs/src/content/docs/workers-ai/index.mdx`
-
-- Workers AI supports image classification and other tasks.
-  - Excerpt: line 65.
-
-### Model recommendation
-
-Primary recommendation: `@cf/microsoft/resnet-50` for first implementation.
-
-Why:
-- Native image-classification task model documented by Cloudflare examples.
-- Task-level limit is high (3000 rpm), good for queue-driven async workloads.
-- Priced per image, predictable for upload pipelines.
-- Simpler output shape for deterministic post-processing.
-
-Secondary option (if custom taxonomy / richer reasoning needed): `@cf/meta/llama-3.2-11b-vision-instruct`.
-
-Why secondary:
-- Better for open-ended visual reasoning and custom class mapping.
-- Usually higher latency/cost and prompt-shape complexity than dedicated classifier.
-
-Inference note:
-- Cloudflare docs here do not provide benchmark tables comparing accuracy by dataset.
-- Recommendation is based on task alignment + documented usage + throughput/pricing characteristics.
-
-## Current codebase behavior (today)
+## Current implementation (codebase)
 
 ### Upload write path
 
-`src/routes/app.$organizationId.upload.tsx`
+Source: `src/routes/app.$organizationId.upload.tsx`
 
-- Upload endpoint writes image directly to R2 with custom metadata:
-  - `organizationId`, `name` (`lines 86-89`).
-- In local env only, it manually sends a queue message to `R2_UPLOAD_QUEUE` (`lines 90-98`).
-- Upload list is read from agent SQLite table `Upload` via `stub.getUploads()` (`lines 110-115`).
+```ts
+await env.R2.put(key, data.file, {
+  httpMetadata: { contentType: data.file.type },
+  customMetadata: { organizationId, name: data.name },
+});
 
-### Queue consume path
+if (env.ENVIRONMENT === "local") {
+  await env.R2_UPLOAD_QUEUE.send({
+    account: "local",
+    action: "PutObject",
+    bucket: env.R2_BUCKET_NAME,
+    object: { key, size: data.file.size, eTag: "local" },
+    eventTime: new Date().toISOString(),
+  });
+}
+```
 
-`src/worker.ts`
+What this means:
+- Uploads already attach `organizationId` + `name` in R2 `customMetadata`.
+- Local dev already simulates notification enqueue.
 
-- `queue()` handler iterates messages (`line 128`).
-- Reads object metadata via `env.R2.head(notification.object.key)` (`line 137`).
-- Extracts `organizationId` and `name` from object custom metadata (`lines 146-148`).
-- Calls `OrganizationAgent` instance by `idFromName(organizationId)` and invokes `onUpload({name})` (`lines 156-158`).
-- Acks every processed message, including missing-object/missing-metadata branches (`lines 143, 153, 159`).
+### Queue consumer path
 
-### Agent/Workflow usage
+Source: `src/worker.ts`
 
-`src/organization-agent.ts`
+```ts
+const head = await env.R2.head(notification.object.key);
+const organizationId = head.customMetadata?.organizationId;
+const name = head.customMetadata?.name;
+...
+await stub.onUpload({ name });
+message.ack();
+```
 
-- `OrganizationAgent` is `AIChatAgent<Env>` (`line 175`), maintains `Upload` table (`lines 178-179`), and broadcasts `upload_complete` on `onUpload` (`lines 199-204`).
-- Existing `OrganizationWorkflow` is approval-oriented, not upload classification (`lines 113-173`).
-- Workflow callbacks are wired to broadcast progress/complete/error (`lines 305-330`).
-- Agent can run workflows and approve/reject them (`lines 332-399`).
+What this means:
+- Consumer fetches latest object metadata from R2 by key.
+- It acks every processed message, including "missing object" and "missing metadata" branches.
+- It does not yet classify images.
 
-### Infra bindings
+### Agent + workflow usage today
 
-`wrangler.jsonc`
+Source: `src/organization-agent.ts`
 
-- DO binding for `ORGANIZATION_AGENT` (`lines 28-34`).
-- Workflow binding for `OrganizationWorkflow` (`lines 36-41`).
-- Queue producer + consumer configured, with `max_retries: 3` and DLQ (`lines 63-77`).
-- Same shape exists under production env (`lines 124-138`, `159-164`).
+- `OrganizationAgent` extends `AIChatAgent<Env>`.
+- `Upload` table is currently:
 
-## Gap analysis for fault-tolerant image classification
+```sql
+create table if not exists Upload (name text primary key, createdAt integer not null)
+```
 
-1. No classification pipeline exists yet.
-- Queue consumer currently only writes `{name, createdAt}` to `Upload` table via agent call.
+- Existing `OrganizationWorkflow` is approval workflow, not classification workflow.
 
-2. Queue processing is at-least-once but downstream action not idempotency-keyed.
-- `insert or replace` by `name` partially absorbs duplicates for upload listing.
-- Classification side effects (future) would need stronger dedupe keying.
+### Infra config today
 
-3. Error branches currently ack and drop.
-- Missing metadata / missing object are acked immediately.
-- For transient errors (AI timeout, network), current handler has no `retry()` strategy.
+Source: `wrangler.jsonc`
 
-4. Queue handler currently does synchronous per-message sequential processing.
-- Works for now, but classification calls will increase latency and retry surface.
+- Queue producer/consumer configured with DLQ and retries:
 
-5. No durable lifecycle/state for classification jobs.
-- No status model (`queued`, `running`, `succeeded`, `failed`, `dead-lettered`).
-- No replay/repair path from DLQ into main flow.
+```json
+{
+  "max_batch_size": 10,
+  "max_batch_timeout": 5,
+  "max_retries": 3,
+  "dead_letter_queue": "r2-upload-notifications-dlq"
+}
+```
 
-## Recommended architecture for classification
+- Durable Object binding for `OrganizationAgent` and workflow binding for `OrganizationWorkflow` exist.
 
-### Design choice
+## Cloudflare findings with direct excerpts
 
-Use both:
-- Queues for ingress decoupling from upload request path.
-- Workflow for durable multi-step classification orchestration.
+### R2 notifications
 
-Reasoning:
-- Queue decouples user upload latency from AI inference latency.
-- Workflow gives durable retries, explicit state steps, and robust recovery semantics.
+Source: `refs/cloudflare-docs/src/content/docs/r2/buckets/event-notifications.mdx`
 
-### Proposed flow
+- R2 -> Queue trigger:
+  > "Event notifications send messages to your queue when data in your R2 bucket changes."
+- Event types include create/overwrite + delete:
+  > "`object-create` ... new objects ... existing objects are overwritten"
+- Message shape includes:
+  > `action`, `object.key`, `object.size`, `object.eTag`, `eventTime`
+- Throughput note:
+  > "per-queue message throughput is currently 5,000 messages per second"
 
-1. Upload server fn writes to R2 with metadata (already exists).
-2. R2 notification enqueues message to `r2-upload-notifications` (prod) or manual send (local, already exists).
-3. Queue consumer validates message + metadata, then starts workflow per object/version:
-   - `runWorkflow("ImageClassificationWorkflow", { organizationId, name, key, eTag, eventTime })`
-4. Workflow steps:
-   - `step.do("fetch-object", ...)` -> `R2.get(key)`
-   - `step.do("classify-image", ...)` -> `env.AI.run("@cf/microsoft/resnet-50", { image })`
-   - `step.do("persist-result", ...)` -> write durable classification row keyed by `(organizationId, key, eTag)`
-   - `step.do("notify-agent", ...)` -> call agent method to broadcast update
-5. Queue consumer `ack()` only after workflow instance is successfully created.
-6. For transient failures before workflow creation, `retry({delaySeconds})` from queue handler.
-7. DLQ consumer path stores failure records and allows replay.
+### eTag and eventTime details (requested)
 
-### Idempotency and dedupe keys
+Source: `refs/cloudflare-docs/src/content/docs/r2/buckets/event-notifications.mdx`
 
-Use `(organizationId, key, eTag)` as primary identity.
+- `object.eTag`:
+  > "The entity tag (eTag) of the object. Note: not present for object-delete events."
+- `eventTime`:
+  > "The time when the action that triggered the event occurred."
+
+Interpretation for this system:
+- `eTag` is usable as a version discriminator for object-create notifications.
+
+Track down what this actually is. Don't be sloppy. 
+
+- `eventTime` is useful metadata but not a strict ordering guarantee.
+
+Track down what event time actually is. Go deep. It's obviously metadata but that says nothing useful. and what is your evidence about strict ordering guarentees?
+
+### Queue ordering + delivery semantics
+
+Source: `refs/cloudflare-docs/src/content/docs/queues/reference/delivery-guarantees.mdx`
+
+- Delivery model:
+  > "Queues provides at least once delivery by default"
+
+Source: `refs/cloudflare-docs/src/content/docs/queues/reference/how-queues-works.mdx`
+
+- Ordering:
+  > "Queues does not guarantee that messages will be delivered ... in the same order"
+
+Source: `refs/cloudflare-docs/src/content/docs/queues/configuration/javascript-apis.mdx`
+
+- Per-message metadata available:
+  > "id: ... unique, system-generated ID"
+  > "timestamp: ... when the message was sent"
+  > "attempts: ... Starts at 1"
+
+Implications:
+- Do not depend on queue order for correctness.
+- Build idempotency keys and stale-event checks.
+- Use `attempts` for retry policy decisions.
+
+### Queue retries and DLQ
+
+Source: `refs/cloudflare-docs/src/content/docs/queues/configuration/batching-retries.mdx`
+
+- Batch defaults:
+  > "max_batch_size ... defaults to 10"
+  > "max_batch_timeout ... defaults to 5 seconds"
+- Ack behavior:
+  > "Messages ... explicitly acknowledged will not be re-delivered"
+- Retry behavior:
+  > "default behaviour is to retry delivery three times"
+
+Source: `refs/cloudflare-docs/src/content/docs/queues/configuration/dead-letter-queues.mdx`
+
+- DLQ behavior:
+  > "Messages are delivered to the DLQ when they reach the configured retry limit"
+
+### Workflows + Agents durability model
+
+Source: `refs/cloudflare-docs/src/content/docs/agents/api-reference/run-workflows.mdx`
+
+- Split of responsibilities:
+  > "Agents excel at real-time communication ... Workflows excel at durable execution"
+- Non-durable methods:
+  > "These methods may repeat on retry"
+- Durable step methods:
+  > "idempotent and will not repeat on retry"
+
+Source: `refs/cloudflare-docs/src/content/docs/workflows/build/rules-of-workflows.mdx`
+
+- Idempotency:
+  > "Because a step might be retried multiple times, your steps should ... be idempotent"
+- State rules:
+  > "Workflows may hibernate and lose all in-memory state"
+- Side effects:
+  > "Avoid doing side effects outside of a `step.do`"
+
+Source: `refs/cloudflare-docs/src/content/docs/workflows/build/sleeping-and-retrying.mdx`
+
+- Default step retry config:
+  > `limit: 5`, `backoff: 'exponential'`, `timeout: '10 minutes'`
+
+## Workers AI model choice for image classification
+
+### Evidence
+
+Source: `refs/cloudflare-docs/src/content/docs/workers-ai/guides/tutorials/explore-workers-ai-models-using-a-jupyter-notebook.mdx`
+
+- Cloudflare image-classification example runs:
+  > `client.workers.ai.run("@cf/microsoft/resnet-50", ... image=...)`
+
+Source: `refs/cloudflare-docs/src/content/docs/workers-ai/platform/limits.mdx`
+
+- Task limit:
+  > "Image Classification ... 3000 requests per minute"
+
+Source: `refs/cloudflare-docs/src/content/docs/workers-ai/platform/pricing.mdx`
+
+- Pricing table includes:
+  > `@cf/microsoft/resnet-50 ... $2.51 per M images`
+
+### Recommendation
+
+Primary: `@cf/microsoft/resnet-50`
 
 Why:
-- Queue is at-least-once.
-- Same key may be overwritten (R2 last-write-wins).
-- `eTag` distinguishes versions of same key.
+- Official Cloudflare example model for this exact task.
+- High task-level throughput.
+- Per-image pricing model is predictable.
 
-### Suggested data model additions
+Secondary (if you need custom visual reasoning/taxonomy mapping): `@cf/meta/llama-3.2-11b-vision-instruct`.
 
-- `ImageClassification` table in `OrganizationAgent` SQLite:
-  - `organizationId text`
-  - `key text`
-  - `eTag text`
-  - `name text`
-  - `status text` (`queued|running|succeeded|failed`)
-  - `model text`
-  - `labels_json text`
-  - `error text nullable`
-  - `createdAt integer`
-  - `updatedAt integer`
-  - primary key `(organizationId, key, eTag)`
+## eTag/eventTime strategy: idempotency + ordering
 
-### Failure-handling policy
+### Can `eTag` be used for idempotency?
 
-- Queue layer:
-  - Use `msg.retry()` for transient errors before workflow creation.
-  - Keep DLQ configured.
-- Workflow layer:
-  - Keep classification and persistence in separate deterministic `step.do` blocks.
-  - Override retry config on AI step if needed.
-  - Throw `NonRetryableError` for permanent validation errors (bad image type, missing object).
+Yes, with caveats.
 
-### Agent integration pattern
+Use idempotency key for create/overwrite events as:
+- `(organizationId, object.key, action, object.eTag)`
 
-- Keep queue handler thin.
-- Keep classification logic in Workflow.
-- Use Agent methods for:
-  - read model (`getClassifications`)
-  - client broadcast (`classification_complete`, `classification_error`)
-  - optional workflow status introspection (already supported by existing workflow helpers).
+Why this works:
+- Queue is at-least-once, so duplicates happen.
+- Same notification redelivery keeps same `eTag`.
+- Overwrite to same key usually changes `eTag`, so new version becomes new key.
 
-## Concrete implications for `src/organization-agent.ts`
+### Can `eventTime` be used for ordering?
 
-- Extend `OrganizationMessage` union with classification events.
-- Add callable list/read methods for classification rows.
-- Add small mutation method used by workflow step (or persist directly in workflow if preferred).
-- Keep current approval workflow unchanged; add second workflow class for classification to avoid mixing concerns.
+Not as correctness primitive.
 
-## Practical implementation order
+Why:
+- Queue ordering is explicitly not guaranteed.
+- `eventTime` is event occurrence timestamp, not delivery ordering contract.
 
-1. Add `ImageClassificationWorkflow` + binding in `wrangler.jsonc`.
-2. Add classification table + RPC/read methods on `OrganizationAgent`.
-3. Change queue consumer to start classification workflow (not direct `onUpload` only).
-4. Add UI section in upload route to display classification status/labels.
-5. Add DLQ consumer and replay command/script.
-6. Load test for duplicate deliveries and overwrite race (`same key`, different `eTag`).
+Use `eventTime` for:
+- observability
+- UI timestamps
+- tie-break display only
 
-## Key references
+Your research is too shallow. Isn't eventTime from r2, not queues? show evidence
+
+### Recommended stale-event guard
+
+Before classifying, compare notification payload with current head:
+- `head = await env.R2.head(key)`
+- if `head` missing -> object deleted, skip/non-retryable
+- if `notification.object.eTag` exists and `head.etag !== notification.object.eTag` -> stale event, ack and skip
+
+This prevents classifying older object versions when newer overwrite already exists.
+
+## Gap analysis (current vs target)
+
+1. No classification pipeline yet.
+- Consumer currently just calls `onUpload({ name })`.
+
+2. Idempotency not explicit for future classifier side effects.
+- Current dedupe is only `Upload.name`.
+
+3. Retry policy is coarse.
+- Missing metadata/object branches are ack+drop.
+- No typed transient/permanent failure routing for classification.
+
+4. No durable classification lifecycle state.
+- No `queued/running/succeeded/failed` rows.
+
+## Proposed fault-tolerant design
+
+### High-level flow
+
+1. Upload to R2 with custom metadata (already done).
+2. R2 event notification to queue (prod) / manual queue send (local, already done).
+3. Queue consumer validates payload and starts `ImageClassificationWorkflow`.
+4. Workflow handles durable steps:
+- `fetch-object`
+- `classify-image`
+- `persist-result`
+- `notify-agent`
+5. Queue message ack only after workflow instance creation succeeds.
+6. Queue retries transient pre-workflow errors; DLQ catches exhausted failures.
+
+### Workflow payload proposal
+
+```ts
+{
+  organizationId: string,
+  key: string,
+  name: string,
+  action: string,
+  eTag?: string,
+  eventTime: string,
+  queueMessageId: string,
+}
+```
+
+### Durable table proposal
+
+`ImageClassification` (in agent SQLite)
+
+- `organizationId text`
+- `key text`
+- `name text`
+- `action text`
+- `eTag text null`
+- `status text` (`queued|running|succeeded|failed|skipped_stale`)
+- `model text`
+- `labels_json text null`
+- `error text null`
+- `eventTime text`
+- `queueMessageId text`
+- `createdAt integer`
+- `updatedAt integer`
+- primary key `(organizationId, key, action, coalesce(eTag, 'no-etag'))`
+
+## Concrete changes implied in this repo
+
+1. Add `ImageClassificationWorkflow` class in `src/organization-agent.ts` (or separate file).
+2. Add workflow binding in `wrangler.jsonc` for both local + production env.
+3. Update `src/worker.ts` `queue()` handler to start classification workflow and include stale-event guard.
+4. Extend `OrganizationMessage` union with classification events.
+5. Add callable methods to list/get classifications.
+6. Update upload route UI to render classification status and top labels.
+7. Add DLQ consumer handling path (or operational replay process).
+
+## Implementation order
+
+1. Data model + agent RPC surface.
+2. Classification workflow + wrangler binding.
+3. Queue consumer -> workflow trigger + eTag stale guard + retry policy.
+4. UI integration.
+5. DLQ replay tooling + load tests for duplicate and out-of-order notifications.
+
+## References
 
 - `refs/cloudflare-docs/src/content/docs/r2/buckets/event-notifications.mdx`
 - `refs/cloudflare-docs/src/content/docs/r2/reference/consistency.mdx`
+- `refs/cloudflare-docs/src/content/docs/r2/reference/durability.mdx`
 - `refs/cloudflare-docs/src/content/docs/queues/reference/delivery-guarantees.mdx`
+- `refs/cloudflare-docs/src/content/docs/queues/reference/how-queues-works.mdx`
 - `refs/cloudflare-docs/src/content/docs/queues/configuration/batching-retries.mdx`
 - `refs/cloudflare-docs/src/content/docs/queues/configuration/dead-letter-queues.mdx`
+- `refs/cloudflare-docs/src/content/docs/queues/configuration/javascript-apis.mdx`
 - `refs/cloudflare-docs/src/content/docs/agents/api-reference/agents-api.mdx`
 - `refs/cloudflare-docs/src/content/docs/agents/api-reference/run-workflows.mdx`
 - `refs/cloudflare-docs/src/content/docs/workflows/build/rules-of-workflows.mdx`
 - `refs/cloudflare-docs/src/content/docs/workflows/build/sleeping-and-retrying.mdx`
-- `refs/cloudflare-docs/src/content/docs/workflows/reference/limits.mdx`
 - `refs/cloudflare-docs/src/content/docs/workers-ai/guides/tutorials/explore-workers-ai-models-using-a-jupyter-notebook.mdx`
 - `refs/cloudflare-docs/src/content/docs/workers-ai/platform/limits.mdx`
 - `refs/cloudflare-docs/src/content/docs/workers-ai/platform/pricing.mdx`
