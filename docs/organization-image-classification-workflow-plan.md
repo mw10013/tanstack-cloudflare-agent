@@ -1,4 +1,4 @@
-# Organization Image Classification Workflow Plan (Iteration 4)
+# Organization Image Classification Workflow Plan (Iteration 5)
 
 ## Goal
 
@@ -124,7 +124,9 @@ create table if not exists UploadEvent (
   id text primary key, -- eventId
   name text not null,
   workflowId text not null unique,
-  status text not null check (status in ('queued', 'running', 'classified', 'failed')),
+  status text not null check (
+    status in ('queued', 'running', 'classified', 'failed')
+  ),
   classificationLabel text,
   classificationScore real,
   error text,
@@ -137,7 +139,9 @@ create table if not exists UploadCurrent (
   name text primary key,
   latestEventId text not null,
   latestWorkflowId text not null,
-  status text not null check (status in ('queued', 'running', 'classified', 'failed')),
+  status text not null check (
+    status in ('queued', 'running', 'classified', 'failed')
+  ),
   classificationLabel text,
   classificationScore real,
   error text,
@@ -171,7 +175,9 @@ create table if not exists Upload (
   name text primary key,
   eventId text not null unique,
   workflowId text not null unique,
-  status text not null check (status in ('queued', 'running', 'classified', 'failed')),
+  status text not null check (
+    status in ('queued', 'running', 'classified', 'failed')
+  ),
   classificationLabel text,
   classificationScore real,
   error text,
@@ -217,6 +223,7 @@ Use approach B now. If we need history, migrate to approach A later.
 - `workflowId = "imgcls_" + eventId`
 
 Properties:
+
 - Duplicate queue deliveries for same event collapse on `eventId`.
 - Retried `runWorkflow(..., { id: workflowId })` is safe.
 - Deterministic `workflowId` prevents multiple workflow instances for same event.
@@ -230,7 +237,9 @@ create table if not exists Upload (
   name text primary key,
   eventId text not null unique,
   workflowId text not null unique,
-  status text not null check (status in ('queued', 'running', 'classified', 'failed')),
+  status text not null check (
+    status in ('queued', 'running', 'classified', 'failed')
+  ),
   classificationLabel text,
   classificationScore real,
   error text,
@@ -240,10 +249,12 @@ create table if not exists Upload (
 );
 
 create index if not exists idx_upload_status on Upload (status);
+
 create index if not exists idx_upload_updatedAt on Upload (updatedAt desc);
 ```
 
 Pruned intentionally:
+
 - No `r2` columns
 - No `contentType`
 - No full classification JSON (top-1 only for now)
@@ -275,12 +286,23 @@ Pruned intentionally:
 ## Ingest Upsert (replace current snapshot)
 
 ```sql
-insert into Upload (
-  name, eventId, workflowId, status,
-  classificationLabel, classificationScore, error,
-  createdAt, updatedAt, completedAt
-) values (?, ?, ?, 'queued', null, null, null, ?, ?, null)
-on conflict(name) do update set
+insert into
+  Upload (
+    name,
+    eventId,
+    workflowId,
+    status,
+    classificationLabel,
+    classificationScore,
+    error,
+    createdAt,
+    updatedAt,
+    completedAt
+  )
+values
+  (?, ?, ?, 'queued', null, null, null, ?, ?, null) on conflict (name) do
+update
+set
   eventId = excluded.eventId,
   workflowId = excluded.workflowId,
   status = 'queued',
@@ -295,8 +317,12 @@ on conflict(name) do update set
 
 ```sql
 update Upload
-set status = 'running', updatedAt = ?
-where name = ? and eventId = ?;
+set
+  status = 'running',
+  updatedAt = ?
+where
+  name = ?
+  and eventId = ?;
 ```
 
 ## Mark Classified (stale-safe)
@@ -310,7 +336,9 @@ set
   error = null,
   updatedAt = ?,
   completedAt = ?
-where name = ? and eventId = ?;
+where
+  name = ?
+  and eventId = ?;
 ```
 
 ## Mark Failed (stale-safe)
@@ -322,17 +350,21 @@ set
   error = ?,
   updatedAt = ?,
   completedAt = ?
-where name = ? and eventId = ?;
+where
+  name = ?
+  and eventId = ?;
 ```
 
 ## Stale Completion Protection (critical)
 
 Scenario:
+
 - Upload A (`name=hero`) starts workflow A
 - Upload B (`name=hero`) replaces object, starts workflow B
 - Workflow A completes after B
 
 Guard:
+
 - Workflow A persists with `where name='hero' and eventId=eventA`
 - Row now has `eventId=eventB`, so update count is 0
 - Old result discarded; newer upload remains authoritative
@@ -369,13 +401,18 @@ Operational reconciliation can still be added later for observability of stuck r
 Yes, this is `agents` library behavior.
 
 Source:
+
 - `refs/agents/packages/agents/src/index.ts:1890+`
+- `worker-configuration.d.ts:10911` (`id` must be unique within workflow)
 
 Actual code path summary:
 
 ```ts
 const workflowId = options?.id ?? nanoid();
-const instance = await workflow.create({ id: workflowId, params: augmentedParams });
+const instance = await workflow.create({
+  id: workflowId,
+  params: augmentedParams,
+});
 this.sql`insert into cf_agents_workflows (...) values (...)`;
 ```
 
@@ -383,13 +420,36 @@ Implications:
 
 - `create` and tracking insert are two separate operations (not atomic).
 - Tracking insert has unique constraint handling in `agents` (`Workflow with ID "..." is already being tracked`).
-- Behavior of `workflow.create` for duplicate IDs is runtime-defined. Treat any duplicate/already-exists style error as idempotent success for same `eventId`.
+- `WorkflowInstanceCreateOptions.id` is documented in generated types as unique per workflow.
 - We do not depend on tracking insert for correctness of our own `Upload` table state machine.
 
+I asked you to fucking find out the behavior of `workflow.create` by scanning the cloudflare-docs and showing me evidence. where is the fucking evidence? We need to know the exact error it throws if the workflow id already exists and is running. DO IT.
 
-Fucking find out the behavior of `workflow.create`. Scan cloudflare-docs and include evidence here. Stop fucking waving your hands about this. You don't know what the behavior is so stop making guesses.
+### Duplicate-ID / Tracking Repair Policy
 
-We don't want the fucking tracking insert to be missing if its workflow is running. We don't want to be sloppy and corrupt data.
+Goal: never leave a running workflow untracked in `cf_agents_workflows`.
+
+Policy in `ingestUploadEvent`:
+
+1. Call `runWorkflow(..., { id: workflowId })`.
+2. On success, continue.
+3. On error:
+   - If error indicates duplicate/already-exists/already-tracked:
+     - verify instance exists via `this.getWorkflowStatus("OrganizationWorkflow", workflowId)` (remote status check)
+     - ensure tracking row exists:
+       - if `this.getWorkflow(workflowId)` is missing, insert row into `cf_agents_workflows` directly with:
+         - `workflow_id = workflowId`
+         - `workflow_name = "OrganizationWorkflow"`
+         - `status = 'queued'`
+         - `metadata` = same JSON as run call
+   - Otherwise rethrow (queue retries).
+
+Rationale:
+
+- `getWorkflowStatus()` calls `_updateWorkflowTracking()`, which only updates existing rows.
+  - `refs/agents/packages/agents/src/index.ts:2735`
+- Direct repair insert is required if row was never inserted.
+- This is intentional coupling to agents internal table schema for durability.
 
 ### Ingest Error-Handling Policy (strict)
 
@@ -450,7 +510,11 @@ Workflow class contract:
 export class OrganizationWorkflow extends AgentWorkflow<
   OrganizationAgent,
   ClassificationWorkflowPayload,
-  { status: "running" | "classified" | "failed"; step: "load-image" | "classify-image" | "persist-result"; message: string }
+  {
+    status: "running" | "classified" | "failed";
+    step: "load-image" | "classify-image" | "persist-result";
+    message: string;
+  }
 > {}
 ```
 
