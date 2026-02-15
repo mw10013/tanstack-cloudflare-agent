@@ -103,21 +103,28 @@ Source: `refs/cloudflare-docs/src/content/docs/r2/buckets/event-notifications.md
 
 ### eTag and eventTime details (requested)
 
-Source: `refs/cloudflare-docs/src/content/docs/r2/buckets/event-notifications.mdx`
+Sources:
+- `refs/cloudflare-docs/src/content/docs/r2/buckets/event-notifications.mdx`
+- `refs/cloudflare-docs/src/content/docs/r2/api/workers/workers-api-reference.mdx`
+- `refs/cloudflare-docs/src/content/docs/queues/configuration/javascript-apis.mdx`
 
 - `object.eTag`:
   > "The entity tag (eTag) of the object. Note: not present for object-delete events."
 - `eventTime`:
   > "The time when the action that triggered the event occurred."
+- R2 object `etag`:
+  > "The etag associated with the object upload."
+- R2 object `version`:
+  > "Random unique string associated with a specific upload of a key."
+- Queue message `timestamp`:
+  > "A timestamp when the message was sent."
 
 Interpretation for this system:
-- `eTag` is usable as a version discriminator for object-create notifications.
-
-Track down what this actually is. Don't be sloppy. 
-
-- `eventTime` is useful metadata but not a strict ordering guarantee.
-
-Track down what event time actually is. Go deep. It's obviously metadata but that says nothing useful. and what is your evidence about strict ordering guarentees?
+- `eventTime` is from the R2 event payload itself (event occurrence time), not queue transport metadata.
+- Queue transport metadata is separate (`message.id`, `message.timestamp`, `message.attempts`).
+- `eTag` is tied to the uploaded object and works as freshness/idempotency signal for create/overwrite events.
+- Delete events do not include `eTag`; delete handling needs a different idempotency key shape.
+- If you need strongest per-upload identity in worker code, `R2.head(key)` exposes `version` (unique per upload), but notification payload does not include `version`.
 
 ### Queue ordering + delivery semantics
 
@@ -133,6 +140,8 @@ Source: `refs/cloudflare-docs/src/content/docs/queues/reference/how-queues-works
 
 Source: `refs/cloudflare-docs/src/content/docs/queues/configuration/javascript-apis.mdx`
 
+- Ordering detail:
+  > "Ordering of messages is best effort -- not guaranteed to be exactly the same as the order in which they were published."
 - Per-message metadata available:
   > "id: ... unique, system-generated ID"
   > "timestamp: ... when the message was sent"
@@ -227,7 +236,8 @@ Use idempotency key for create/overwrite events as:
 Why this works:
 - Queue is at-least-once, so duplicates happen.
 - Same notification redelivery keeps same `eTag`.
-- Overwrite to same key usually changes `eTag`, so new version becomes new key.
+- `eTag` is defined by R2 as upload-associated object metadata.
+- For stronger identity, read `head.version` and persist `(key, version)` after fetching metadata.
 
 ### Can `eventTime` be used for ordering?
 
@@ -235,14 +245,14 @@ Not as correctness primitive.
 
 Why:
 - Queue ordering is explicitly not guaranteed.
-- `eventTime` is event occurrence timestamp, not delivery ordering contract.
+- Queues docs also state ordering is only best effort.
+- `eventTime` is R2 event occurrence timestamp.
+- Queue delivery has its own timestamp (`message.timestamp`), also without FIFO ordering guarantee.
 
 Use `eventTime` for:
 - observability
 - UI timestamps
 - tie-break display only
-
-Your research is too shallow. Isn't eventTime from r2, not queues? show evidence
 
 ### Recommended stale-event guard
 
