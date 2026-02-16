@@ -97,15 +97,17 @@ For workflow completion:
 - Workflow ID = upload `idempotencyKey` (stable retry key).
 - Call `runWorkflow(..., { id: idempotencyKey, metadata: ... })`.
 - No manual writes to `cf_agents_workflows` (avoid coupling to SDK internals).
-- Pre-start guard must check both, and only start when both are clear:
-  - agent-visible state (`getWorkflow(idempotencyKey)` / tracked status), and
-  - underlying workflow instance state via workflow binding status for `idempotencyKey`.
-- If either indicates active/running/waiting, do not start another workflow for that key.
-- If states are inconsistent (tracked says none, binding says running; or inverse), reconcile to a known state before any new start:
-  - use workflow binding status as ground truth,
-  - stop/terminate active instance when supported,
-  - keep `idempotencyKey` as authoritative row marker,
-  - do not call `runWorkflow` during inconsistency window.
+- Pre-start flow is reset-first:
+  - attempt cleanup via agent-tracked workflow APIs for the same `idempotencyKey`,
+  - then check workflow binding ground truth and stop/terminate active instance when supported,
+  - then start fresh workflow with same `idempotencyKey`.
+- Use workflow binding status as ground truth when tracking and binding disagree.
+
+You misunderstand. You always need to do both. You need to attempt cleanup via agent-tracked workflow API's. And regardless of that outcome you still need to use workflow binding to see if there's a workflow and stop it if there is. You always need to do this regardless of the outcome of agent-tracked workflow API's. Why? Because the API's are not atomic and fault-tolerant. Do you understand this? Prove me wrong.
+
+And since you keep fucking this up, the code need to include jsdoc explaining all this.
+
+- Keep `idempotencyKey` as authoritative row marker.
 - Duplicate-ID create is treated as an invariant violation, not acceptable steady-state behavior:
   - do not silently continue,
   - fail the current queue attempt (no `ack()`) so retry path re-enters reconciliation-first flow.
@@ -214,27 +216,22 @@ For workflow completion:
    - load row by `name`.
    - if incoming `eventTime` older than stored `eventTime`, broadcast skipped + return.
    - else upsert marker fields (`eventTime`, `idempotencyKey`).
+3. Inline reset-first workflow cleanup directly in `onUpload` (no separate reconciliation helper function in MVP):
+   - check agent tracking for `idempotencyKey` via agent workflow APIs.
+   - attempt to stop/terminate tracked instance for that ID when present.
+   - handle “not found / already terminal” as no-op.
+   - handle local-dev “not implemented” workflow-control errors explicitly (known SDK limitation in local dev).
 
-The remaining steps seem muddy and now well thought out. Think deeply and don't be sloppy. All these steps should go into onUpload and not in a helper function.
+What is this known SDK limitation? Explain what the hell is going on here and why this is needed.
 
-I think first thing is to use agent workflow helper in agents class to stop workflow with idempotencyKey. It may not need to stop anything so check its implementation to see how to handle that case in case it throws an error. 
+4. Query workflow binding ground truth for the same `idempotencyKey` (`env.<classification_binding>.get(id).status()`):
+   - if instance exists and is active/waiting, stop/terminate it when supported.
 
-Then, I think you need to use the workflow binding to see if a workflow with idempotencyKey exists. This is ground truth and handles the case where workflow is created, but fault prevents tracking insert. If the workflow exists then stop it.
+What do you mean when supported. We need to make sure that workflow gets stopped and doesn't exist.
 
-Now everything should be reset to blank slate so start a workflow with idempotencyKey.
-
-I don't think we need 'not clear' state or some such. We simply clean up and reset everything. And then kick off the workflow.
-
-Prove me wrong
-
-3. Implement pre-start reconciliation helper (agent method):
-   - inspect `getWorkflow(idempotencyKey)` tracking state.
-   - inspect workflow binding instance status by ID (`env.<classification_binding>.get(id).status()`).
-   - if inconsistent or active, stop/terminate active instance when supported and return “not clear”.
-   - only return “clear to start” when both sides indicate no active instance.
-   
-4. Start classification workflow with explicit ID (`idempotencyKey`) only when reconciliation says clear.
-5. Duplicate-ID create or any invariant breach:
+   - if already terminal/non-existent, continue.
+5. After cleanup/reset pass, start classification workflow with explicit ID (`idempotencyKey`).
+6. If start still fails with duplicate-ID or invariant breach:
    - treat as failure (throw), no `ack()` in queue path so message retries.
 
 ### Phase 6: guarded result apply path
