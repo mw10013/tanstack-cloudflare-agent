@@ -2,7 +2,7 @@
 
 ## Goal
 
-When an image upload lands in R2 and emits an R2 event notification, run `OrganizationWorkflow` to classify the image with Workers AI `@cf/microsoft/resnet-50` through AI Gateway, and persist the latest classification in organization-agent SQLite.
+When an image upload lands in R2 and emits an R2 event notification, run a dedicated image-classification workflow to classify the image with Workers AI `@cf/microsoft/resnet-50` through AI Gateway, and persist the latest classification in organization-agent SQLite.
 
 This plan is design-only. No implementation steps executed yet.
 
@@ -45,7 +45,9 @@ Feasible with current stack (TanStack Start + Agents + Workflows + R2 + Queue). 
 
 ## 1) Scope and non-goals
 
-- Replace approval semantics in `OrganizationWorkflow` with classification workflow semantics.
+- Keep existing approval workflow behavior as-is.
+- Add a separate classification workflow in the same agent module.
+- Add Wrangler workflow binding/config for the new workflow.
 - Preserve existing upload UX route; workflow route may be repurposed or deprecated in follow-up.
 - No multi-label storage initially; store top-1 only.
 
@@ -75,16 +77,14 @@ Required logical fields (camelCase):
 
 ## 4) Ordering and staleness rules
 
-I want to be clear. Because the agent workflow helper are not atomic and fault tolerant, I think every time onUpload gets passed eventTime check, we need to reset everything to a known state especially regarding the workflow. We can't resuse a workflow so we must ensure that no workflow is running or tracked. This needs to be at the agent workflow helper level and also at the workflow binding level (ground truth).
-
-Prove me wrong.
-
 For every queue event:
 
 - Queue handler forwards event metadata to agent; it does not do ordering logic.
 - Agent `onUpload` compares incoming `eventTime` against stored `eventTime`.
 - If older than current marker: no-op + `ack()`.
-- If newer: upsert marker (`eventTime`, `idempotencyKey`) first, then trigger workflow.
+- If newer: upsert marker (`eventTime`, `idempotencyKey`) first.
+- After marker upsert, reconcile workflow state to known state (agent tracking + workflow binding status) before any start.
+- Start only after reconciliation confirms no active workflow for that marker.
 
 For workflow completion:
 
@@ -114,8 +114,8 @@ For workflow completion:
 
 ## 6) Workflow definition changes
 
-- Replace approval payload (`title`, `description`) with classification payload (object identity + marker fields).
-- Remove `waitForApproval` path entirely.
+- Keep current approval workflow unchanged.
+- Add a new workflow definition with classification payload (object identity + marker fields).
 - Ensure external side effects (AI inference, result persistence callback) are wrapped in `step.do` (`refs/cloudflare-docs/src/content/docs/workflows/build/rules-of-workflows.mdx:218`).
 - Return durable classification result payload from workflow and propagate via `onWorkflowComplete`.
 
@@ -136,8 +136,8 @@ For workflow completion:
 - Upload page message schema currently expects approval-era workflow states (`src/routes/app.$organizationId.upload.tsx:44`).
 - Workflow page is approval-specific (`src/routes/app.$organizationId.workflow.tsx:33`).
 - Plan update:
-  - introduce classification-centric workflow message types/status.
-  - decide whether to repurpose `/workflow` route to classification history/diagnostics or remove.
+  - introduce classification-centric workflow message types/status for upload/inspection surfaces.
+  - keep `/app/$organizationId/workflow` for approval workflow.
 
 ## 10) Validation plan (no code yet)
 
@@ -154,13 +154,5 @@ For workflow completion:
 - Ordering check location: agent `onUpload`, not queue handler.
 - No direct writes to `cf_agents_workflows`.
 - AI/model failure handling: retry at queue level (no `ack()`).
-
-## Remaining decisions
-
-1. Should `/app/$organizationId/workflow` be kept and repurposed, or removed from MVP scope?
-
-Hmmm, I think let's leave that workflow as is and we create a new workflow in the same file. Will need wrangler config changes. Also, remove the requirements about removing approval flow since these will be two separate workflows. 
-
-2. Should classification be persisted in `Upload` table (extend) or split into dedicated `UploadClassification` table?
-
-In upload table.
+- Keep approval workflow and route as-is; add separate classification workflow + Wrangler binding.
+- Persist classification by extending `Upload` table (no separate `UploadClassification` table in MVP).
