@@ -163,8 +163,14 @@ For workflow completion:
 
 1. Update `Upload` table schema in `src/organization-agent.ts` constructor:
    - add columns: `eventTime`, `idempotencyKey`, `workflowStatus`, `classificationLabel`, `classificationScore`, `classifiedAt`, `updatedAt`.
+
+Why do we need workflowStatus? Do we really need to track the workflowStatus here? why? Remove updatedAt.
+
    - keep `name` as primary key.
    - add additive `alter table` migration logic for existing instances (same style as agent internal additive migrations).
+
+No alter migration. we are starting database schema from scratch in local dev.
+
 2. Add/adjust zod row schema in `src/organization-agent.ts` for typed upload rows returned to UI.
 3. Expand websocket message union in `src/organization-agent.ts` and `src/routes/app.$organizationId.upload.tsx`:
    - keep approval messages unchanged.
@@ -197,8 +203,14 @@ For workflow completion:
    - add new class, e.g. `OrganizationImageClassificationWorkflow extends AgentWorkflow<...>`.
 2. Classification workflow payload fields:
    - `organizationId`, `name`, `idempotencyKey`, `eventTime`.
+
+I think only idempotencyKey is needed. also, the r2 name for the object (not the name of the image which is different)
+
 3. Workflow steps (all side effects in `step.do`):
    - fetch image bytes from R2 (`organizationId/name` key).
+
+ Workflow should not need to know the details of r2 name key. It should just get it. Does not need to know about organizationId.
+
    - call Workers AI `@cf/microsoft/resnet-50` via gateway-enabled path.
    - select top-1 prediction.
    - callback to agent method to apply guarded classification write.
@@ -212,11 +224,17 @@ For workflow completion:
    - load row by `name`.
    - if incoming `eventTime` older than stored `eventTime`, broadcast skipped + return.
    - else upsert marker fields (`eventTime`, `idempotencyKey`, `workflowStatus='queued'`, `updatedAt`).
+
+ Do we really need workflowStatus and updatedAt.
+
 3. Implement pre-start reconciliation helper (agent method):
    - inspect `getWorkflow(idempotencyKey)` tracking state.
    - inspect workflow binding instance status by ID (`env.<classification_binding>.get(id).status()`).
    - if inconsistent, update row `workflowStatus` and return “not clear”.
    - only return “clear to start” when both sides indicate no active instance.
+
+ Need to stop workflow if running, right? get it to known reset state.
+   
 4. Start classification workflow with explicit ID (`idempotencyKey`) only when reconciliation says clear.
 5. Duplicate-ID create or any invariant breach:
    - treat as failure (throw), no `ack()` in queue path so message retries.
