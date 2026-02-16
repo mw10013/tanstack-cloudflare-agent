@@ -75,6 +75,10 @@ Required logical fields (camelCase):
 
 ## 4) Ordering and staleness rules
 
+I want to be clear. Because the agent workflow helper are not atomic and fault tolerant, I think every time onUpload gets passed eventTime check, we need to reset everything to a known state especially regarding the workflow. We can't resuse a workflow so we must ensure that no workflow is running or tracked. This needs to be at the agent workflow helper level and also at the workflow binding level (ground truth).
+
+Prove me wrong.
+
 For every queue event:
 
 - Queue handler forwards event metadata to agent; it does not do ordering logic.
@@ -154,4 +158,9 @@ For workflow completion:
 ## Remaining decisions
 
 1. Should `/app/$organizationId/workflow` be kept and repurposed, or removed from MVP scope?
+
+Hmmm, I think let's leave that workflow as is and we create a new workflow in the same file. Will need wrangler config changes. Also, remove the requirements about removing approval flow since these will be two separate workflows. 
+
 2. Should classification be persisted in `Upload` table (extend) or split into dedicated `UploadClassification` table?
+
+In upload table.
