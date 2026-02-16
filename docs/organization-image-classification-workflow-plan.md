@@ -98,15 +98,11 @@ For workflow completion:
 - Call `runWorkflow(..., { id: idempotencyKey, metadata: ... })`.
 - No manual writes to `cf_agents_workflows` (avoid coupling to SDK internals).
 - Pre-start flow is reset-first:
-  - attempt cleanup via agent-tracked workflow APIs for the same `idempotencyKey`,
-  - then check workflow binding ground truth and stop/terminate active instance when supported,
-  - then start fresh workflow with same `idempotencyKey`.
+  - always attempt cleanup via agent-tracked workflow APIs for the same `idempotencyKey`,
+  - always query workflow binding ground truth for the same `idempotencyKey`,
+  - always attempt to stop/terminate any active instance found at either layer,
+  - only then start fresh workflow with same `idempotencyKey`.
 - Use workflow binding status as ground truth when tracking and binding disagree.
-
-You misunderstand. You always need to do both. You need to attempt cleanup via agent-tracked workflow API's. And regardless of that outcome you still need to use workflow binding to see if there's a workflow and stop it if there is. You always need to do this regardless of the outcome of agent-tracked workflow API's. Why? Because the API's are not atomic and fault-tolerant. Do you understand this? Prove me wrong.
-
-And since you keep fucking this up, the code need to include jsdoc explaining all this.
-
 - Keep `idempotencyKey` as authoritative row marker.
 - Duplicate-ID create is treated as an invariant violation, not acceptable steady-state behavior:
   - do not silently continue,
@@ -220,19 +216,21 @@ And since you keep fucking this up, the code need to include jsdoc explaining al
    - check agent tracking for `idempotencyKey` via agent workflow APIs.
    - attempt to stop/terminate tracked instance for that ID when present.
    - handle “not found / already terminal” as no-op.
-   - handle local-dev “not implemented” workflow-control errors explicitly (known SDK limitation in local dev).
-
-What is this known SDK limitation? Explain what the hell is going on here and why this is needed.
+   - handle local-dev workflow-control limitation explicitly:
+     - Agents workflow control wrappers (`terminateWorkflow`/`pauseWorkflow`/`restartWorkflow`) are documented by the SDK as not implemented in local dev and throw `Not implemented` errors (`refs/agents/packages/agents/src/index.ts:2102`, `refs/agents/packages/agents/src/index.ts:2129`, `refs/agents/packages/agents/src/index.ts:2287`).
+     - in local dev, when this occurs, treat as reset failure and throw so queue retry semantics apply (no `ack()`).
 
 4. Query workflow binding ground truth for the same `idempotencyKey` (`env.<classification_binding>.get(id).status()`):
-   - if instance exists and is active/waiting, stop/terminate it when supported.
-
-What do you mean when supported. We need to make sure that workflow gets stopped and doesn't exist.
-
+   - if instance exists and is active/waiting, attempt stop/terminate unconditionally.
+   - if stop/terminate fails, treat as reset failure and throw (no `ack()`).
    - if already terminal/non-existent, continue.
 5. After cleanup/reset pass, start classification workflow with explicit ID (`idempotencyKey`).
 6. If start still fails with duplicate-ID or invariant breach:
    - treat as failure (throw), no `ack()` in queue path so message retries.
+7. Add jsdoc on `onUpload` reset sequence in code:
+   - explain why cleanup must always run in both layers (tracking + binding),
+   - explain non-atomic `runWorkflow` create/tracking behavior,
+   - explain why reset failures throw to trigger queue retry.
 
 ### Phase 6: guarded result apply path
 
