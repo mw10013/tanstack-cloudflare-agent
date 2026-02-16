@@ -69,11 +69,9 @@ Required logical fields (camelCase):
 - `name` (pk)
 - `eventTime`
 - `idempotencyKey`
-- `workflowStatus`
 - `classificationLabel`
 - `classificationScore`
 - `classifiedAt`
-- `updatedAt`
 
 ## 4) Ordering and staleness rules
 
@@ -104,7 +102,8 @@ For workflow completion:
   - underlying workflow instance state via workflow binding status for `idempotencyKey`.
 - If either indicates active/running/waiting, do not start another workflow for that key.
 - If states are inconsistent (tracked says none, binding says running; or inverse), reconcile to a known state before any new start:
-  - set row `workflowStatus` from binding status,
+  - use workflow binding status as ground truth,
+  - stop/terminate active instance when supported,
   - keep `idempotencyKey` as authoritative row marker,
   - do not call `runWorkflow` during inconsistency window.
 - Duplicate-ID create is treated as an invariant violation, not acceptable steady-state behavior:
@@ -162,14 +161,9 @@ For workflow completion:
 ### Phase 1: schema + message contracts
 
 1. Update `Upload` table schema in `src/organization-agent.ts` constructor:
-   - add columns: `eventTime`, `idempotencyKey`, `workflowStatus`, `classificationLabel`, `classificationScore`, `classifiedAt`, `updatedAt`.
-
-Why do we need workflowStatus? Do we really need to track the workflowStatus here? why? Remove updatedAt.
-
+   - add columns: `eventTime`, `idempotencyKey`, `classificationLabel`, `classificationScore`, `classifiedAt`.
    - keep `name` as primary key.
-   - add additive `alter table` migration logic for existing instances (same style as agent internal additive migrations).
-
-No alter migration. we are starting database schema from scratch in local dev.
+   - no additive `alter table` migration logic in this pass (local schema reset baseline).
 
 2. Add/adjust zod row schema in `src/organization-agent.ts` for typed upload rows returned to UI.
 3. Expand websocket message union in `src/organization-agent.ts` and `src/routes/app.$organizationId.upload.tsx`:
@@ -202,14 +196,10 @@ No alter migration. we are starting database schema from scratch in local dev.
    - keep current `OrganizationWorkflow` approval class unchanged.
    - add new class, e.g. `OrganizationImageClassificationWorkflow extends AgentWorkflow<...>`.
 2. Classification workflow payload fields:
-   - `organizationId`, `name`, `idempotencyKey`, `eventTime`.
-
-I think only idempotencyKey is needed. also, the r2 name for the object (not the name of the image which is different)
+   - `idempotencyKey`, `r2ObjectKey`.
 
 3. Workflow steps (all side effects in `step.do`):
-   - fetch image bytes from R2 (`organizationId/name` key).
-
- Workflow should not need to know the details of r2 name key. It should just get it. Does not need to know about organizationId.
+   - fetch image bytes from R2 using `r2ObjectKey` from payload.
 
    - call Workers AI `@cf/microsoft/resnet-50` via gateway-enabled path.
    - select top-1 prediction.
@@ -223,17 +213,13 @@ I think only idempotencyKey is needed. also, the r2 name for the object (not the
 2. Implement ordering gate:
    - load row by `name`.
    - if incoming `eventTime` older than stored `eventTime`, broadcast skipped + return.
-   - else upsert marker fields (`eventTime`, `idempotencyKey`, `workflowStatus='queued'`, `updatedAt`).
-
- Do we really need workflowStatus and updatedAt.
+   - else upsert marker fields (`eventTime`, `idempotencyKey`).
 
 3. Implement pre-start reconciliation helper (agent method):
    - inspect `getWorkflow(idempotencyKey)` tracking state.
    - inspect workflow binding instance status by ID (`env.<classification_binding>.get(id).status()`).
-   - if inconsistent, update row `workflowStatus` and return “not clear”.
+   - if inconsistent or active, stop/terminate active instance when supported and return “not clear”.
    - only return “clear to start” when both sides indicate no active instance.
-
- Need to stop workflow if running, right? get it to known reset state.
    
 4. Start classification workflow with explicit ID (`idempotencyKey`) only when reconciliation says clear.
 5. Duplicate-ID create or any invariant breach:
@@ -242,14 +228,14 @@ I think only idempotencyKey is needed. also, the r2 name for the object (not the
 ### Phase 6: guarded result apply path
 
 1. Add callable/internal agent method for workflow completion apply, e.g. `applyClassificationResult`.
-2. Input: `{ name, idempotencyKey, label, score, workflowStatus, classifiedAt }`.
+2. Input: `{ name, idempotencyKey, label, score, classifiedAt }`.
 3. Guard:
    - read current row by `name`.
    - if row `idempotencyKey !== input.idempotencyKey`, drop as stale.
 4. If guard passes, update:
-   - `classificationLabel`, `classificationScore`, `classifiedAt`, `workflowStatus='complete'`, `updatedAt`.
+   - `classificationLabel`, `classificationScore`, `classifiedAt`.
 5. On workflow error callback (`onWorkflowError`):
-   - update `workflowStatus='errored'` only if row `idempotencyKey` still matches workflow ID.
+   - emit classification error only if row `idempotencyKey` still matches workflow ID.
 
 ### Phase 7: workflow callbacks and status mapping
 
@@ -257,13 +243,13 @@ I think only idempotencyKey is needed. also, the r2 name for the object (not the
    - branch by workflow name so approval and classification signals remain separate.
 2. Preserve approval callbacks for existing route behavior.
 3. Add classification callback broadcasts used by upload/inspector views.
-4. Update `getUploads()` query to return new classification/status fields for UI.
+4. Update `getUploads()` query to return classification fields for UI.
 
 ### Phase 8: UI updates (minimal MVP)
 
 1. `src/routes/app.$organizationId.upload.tsx`:
    - extend loader data typing to include classification fields.
-   - render classification label/score/status per upload card.
+   - render classification label/score per upload card.
    - wire new websocket message types to invalidate/refetch and message list formatting.
 2. Leave `src/routes/app.$organizationId.workflow.tsx` approval UX unchanged.
 3. Optional: small updates in `app.$organizationId.inspector.tsx` for status visibility if already workflow-centric.
