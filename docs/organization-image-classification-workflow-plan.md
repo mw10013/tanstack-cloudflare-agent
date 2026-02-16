@@ -215,6 +215,18 @@ For workflow completion:
    - if incoming `eventTime` older than stored `eventTime`, broadcast skipped + return.
    - else upsert marker fields (`eventTime`, `idempotencyKey`).
 
+The remaining steps seem muddy and now well thought out. Think deeply and don't be sloppy. All these steps should go into onUpload and not in a helper function.
+
+I think first thing is to use agent workflow helper in agents class to stop workflow with idempotencyKey. It may not need to stop anything so check its implementation to see how to handle that case in case it throws an error. 
+
+Then, I think you need to use the workflow binding to see if a workflow with idempotencyKey exists. This is ground truth and handles the case where workflow is created, but fault prevents tracking insert. If the workflow exists then stop it.
+
+Now everything should be reset to blank slate so start a workflow with idempotencyKey.
+
+I don't think we need 'not clear' state or some such. We simply clean up and reset everything. And then kick off the workflow.
+
+Prove me wrong
+
 3. Implement pre-start reconciliation helper (agent method):
    - inspect `getWorkflow(idempotencyKey)` tracking state.
    - inspect workflow binding instance status by ID (`env.<classification_binding>.get(id).status()`).
