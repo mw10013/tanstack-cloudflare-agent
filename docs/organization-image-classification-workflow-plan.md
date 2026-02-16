@@ -54,65 +54,58 @@ Feasible with current stack (TanStack Start + Agents + Workflows + R2 + Queue). 
 - Upload write must include immutable per-upload id:
   - `idempotencyKey` (UUID) in R2 `customMetadata`.
 - Queue notification payload already carries:
-  - `object.key`, `object.eTag`, `eventTime` (`refs/cloudflare-docs/src/content/docs/r2/buckets/event-notifications.mdx:74`).
+  - `object.key`, `eventTime` (`refs/cloudflare-docs/src/content/docs/r2/buckets/event-notifications.mdx:74`).
 - Worker queue handler passes to agent:
-  - `organizationId`, `name`, `key`, `eventTime`, `eTag`, `idempotencyKey`.
+  - `organizationId`, `name`, `eventTime`, `idempotencyKey`.
 
 ## 3) Agent state model (single source of truth per `name`)
 
 Keep `name` as PK and add latest-upload + latest-classification columns so stale writes are rejected deterministically.
 
-Required logical fields:
+Required logical fields (camelCase):
 
 - `name` (pk)
-- `key`
-- `latest_event_time`
-- `latest_etag`
-- `latest_idempotency_key`
-- `last_workflow_id`
-- `workflow_status`
-- `classification_label`
-- `classification_score`
-- `classification_model` (e.g. `@cf/microsoft/resnet-50`)
-- `classified_at`
-- `updated_at`
+- `latestEventTime`
+- `latestIdempotencyKey`
+- `workflowStatus`
+- `classificationLabel`
+- `classificationScore`
+- `classifiedAt`
+- `updatedAt`
 
-Use camelCase. remove key, etag, workflow id (idempotencyKey is used as workflow id), model
+Get rid of the `latest` prefix. we don't fucking need it
 
 ## 4) Ordering and staleness rules
 
 For every queue event:
 
-- Compare incoming `(eventTime, eTag)` against row’s latest marker.
+- Queue handler forwards event metadata to agent; it does not do ordering logic.
+- Agent `onUpload` compares incoming `eventTime` against stored `latestEventTime`.
 - If older than current marker: no-op + `ack()`.
-- If newer: upsert latest marker first, then trigger workflow.
-
-Forget eTag. queue handler can't do comparison of eventTime. onUpdate handler of agent should do it.
+- If newer: upsert latest marker (`latestEventTime`, `latestIdempotencyKey`) first, then trigger workflow.
 
 For workflow completion:
 
-- Completion must include expected marker (`eventTime`, `eTag`, `idempotencyKey`).
-- Before writing classification, re-check row marker still matches expected marker.
+- Completion must include expected marker (`idempotencyKey`).
+- Before writing classification, re-check row marker still matches expected `latestIdempotencyKey`.
 - If marker mismatch, drop completion as stale (do not overwrite newer upload state).
 
-You are getting confused by the eTag. Maybe we should leave it out entirely so it doesn't confuse you. We don't care about the eTag. The idempotencyKey is generic.
-
-Workflow must always check idenpotencyKey. That is the guard.
-
-
+`idempotencyKey` is the only authoritative stale-write guard.
 
 ## 5) Workflow launch/idempotency strategy
 
 - Workflow ID = upload `idempotencyKey` (stable retry key).
 - Call `runWorkflow(..., { id: idempotencyKey, metadata: ... })`.
 - Handle duplicate-ID case (create error) as idempotent success path.
-- Reconciliation path for create/tracking split-brain:
-  - if workflow exists but tracking row missing, insert tracking row explicitly in agent sqlite.
-  - rationale: `runWorkflow` does `create` then tracking insert (`refs/agents/packages/agents/src/index.ts:1906`, `refs/agents/packages/agents/src/index.ts:1917`).
+- No manual writes to `cf_agents_workflows` (avoid coupling to SDK internals).
+- Pre-start guard must check both:
+  - agent-visible state (`getWorkflow(idempotencyKey)` / tracked status), and
+  - underlying workflow instance state via workflow binding status for `idempotencyKey`.
+- If either indicates active/running/waiting, do not start another workflow for that key.
+- If duplicate-ID create happens anyway, treat as equivalent to “already started” and continue with status polling/reconciliation via public APIs only.
+- Rationale: `runWorkflow` create+tracking is non-atomic (`refs/agents/packages/agents/src/index.ts:1906`, `refs/agents/packages/agents/src/index.ts:1917`), so guards must not rely on tracking row alone.
 
-The agent helpers around workflows are not atomic or fault tolerant. I think we need to ensure a workflow with idempotency key is not running before we kick off a workflow. That is tricky because the agent workflow helpers are not atomic and the tracking insert may get missed.
-
-We don't want to have to manually insert tracking row since that's implementation details we don't want to know. So we just need to make sure that agent doesn't think it's running a workflow and also the workflow is not running untracked by agent. 
+We can't allow a duplicate-Id create haapens anyway. that is so fucking sloppy. Stop that shit. we need to reset to a known state.
 
 ## 6) Workflow definition changes
 
@@ -146,12 +139,13 @@ We don't want to have to manually insert tracking row since that's implementatio
 - Duplicate queue delivery for same event => one durable classification write.
 - Two uploads same `name` out of order notifications => newest marker wins.
 - Old workflow completion arriving late => rejected as stale.
-- `runWorkflow` partial-failure simulation (create succeeded, tracking insert failed) => reconciliation restores tracking.
+- `runWorkflow` partial-failure simulation (create succeeded, tracking insert failed) => no duplicate workflow start; agent still converges using idempotency/status checks via public APIs.
 - Local and production parity for queue flow (`src/routes/app.$organizationId.upload.tsx:90` local synthetic queue message path).
 
 ## Gaps / Decisions Needed (for your annotation)
 
 1. Should `/app/$organizationId/workflow` be kept and repurposed, or removed from MVP scope?
 2. Should classification be persisted in `Upload` table (extend) or split into dedicated `UploadClassification` table?
-3. For stale comparison, do we require both `eventTime` and `eTag` match, or `idempotencyKey` alone authoritative?
-4. On AI/model failure, do we persist terminal `workflow_status=errored` only, or include retryable backoff policy beyond default step retries?
+3. On AI/model failure, do we persist terminal `workflowStatus=errored` only, or include retryable backoff policy beyond default step retries?
+
+ai/model failure should be retried at queue level.
