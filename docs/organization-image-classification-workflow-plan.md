@@ -108,7 +108,7 @@ For workflow completion:
   - do not silently continue,
   - fail the current queue attempt (no `ack()`) so retry path re-enters reconciliation-first flow.
 - Rationale: `runWorkflow` create+tracking is non-atomic (`refs/agents/packages/agents/src/index.ts:1906`, `refs/agents/packages/agents/src/index.ts:1917`), so guards must not rely on tracking row alone.
-- Local-dev policy is fail-fast (Option 1):
+- Local-dev policy is fail-fast:
   - if reset/control APIs throw local-dev `Not implemented`, rethrow,
   - allow queue retries to continue and eventually DLQ in local if unresolved,
   - no environment-specific fallback path in MVP.
