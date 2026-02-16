@@ -77,6 +77,8 @@ Required logical fields:
 - `classified_at`
 - `updated_at`
 
+Use camelCase. remove key, etag, workflow id (idempotencyKey is used as workflow id), model
+
 ## 4) Ordering and staleness rules
 
 For every queue event:
@@ -85,11 +87,19 @@ For every queue event:
 - If older than current marker: no-op + `ack()`.
 - If newer: upsert latest marker first, then trigger workflow.
 
+Forget eTag. queue handler can't do comparison of eventTime. onUpdate handler of agent should do it.
+
 For workflow completion:
 
 - Completion must include expected marker (`eventTime`, `eTag`, `idempotencyKey`).
 - Before writing classification, re-check row marker still matches expected marker.
 - If marker mismatch, drop completion as stale (do not overwrite newer upload state).
+
+You are getting confused by the eTag. Maybe we should leave it out entirely so it doesn't confuse you. We don't care about the eTag. The idempotencyKey is generic.
+
+Workflow must always check idenpotencyKey. That is the guard.
+
+
 
 ## 5) Workflow launch/idempotency strategy
 
@@ -99,6 +109,10 @@ For workflow completion:
 - Reconciliation path for create/tracking split-brain:
   - if workflow exists but tracking row missing, insert tracking row explicitly in agent sqlite.
   - rationale: `runWorkflow` does `create` then tracking insert (`refs/agents/packages/agents/src/index.ts:1906`, `refs/agents/packages/agents/src/index.ts:1917`).
+
+The agent helpers around workflows are not atomic or fault tolerant. I think we need to ensure a workflow with idempotency key is not running before we kick off a workflow. That is tricky because the agent workflow helpers are not atomic and the tracking insert may get missed.
+
+We don't want to have to manually insert tracking row since that's implementation details we don't want to know. So we just need to make sure that agent doesn't think it's running a workflow and also the workflow is not running untracked by agent. 
 
 ## 6) Workflow definition changes
 
