@@ -108,6 +108,10 @@ For workflow completion:
   - do not silently continue,
   - fail the current queue attempt (no `ack()`) so retry path re-enters reconciliation-first flow.
 - Rationale: `runWorkflow` create+tracking is non-atomic (`refs/agents/packages/agents/src/index.ts:1906`, `refs/agents/packages/agents/src/index.ts:1917`), so guards must not rely on tracking row alone.
+- Local-dev policy is fail-fast (Option 1):
+  - if reset/control APIs throw local-dev `Not implemented`, rethrow,
+  - allow queue retries to continue and eventually DLQ in local if unresolved,
+  - no environment-specific fallback path in MVP.
 
 ## 6) Workflow definition changes
 
@@ -153,6 +157,7 @@ For workflow completion:
 - AI/model failure handling: retry at queue level (no `ack()`).
 - Keep approval workflow and route as-is; add separate classification workflow + Wrangler binding.
 - Persist classification by extending `Upload` table (no separate `UploadClassification` table in MVP).
+- Local-dev workflow-control limitation handling: Option 1 fail-fast; no env-specific specialization.
 
 ## 11) Detailed implementation steps (for review)
 
@@ -218,7 +223,7 @@ For workflow completion:
    - handle “not found / already terminal” as no-op.
    - handle local-dev workflow-control limitation explicitly:
      - Agents workflow control wrappers (`terminateWorkflow`/`pauseWorkflow`/`restartWorkflow`) are documented by the SDK as not implemented in local dev and throw `Not implemented` errors (`refs/agents/packages/agents/src/index.ts:2102`, `refs/agents/packages/agents/src/index.ts:2129`, `refs/agents/packages/agents/src/index.ts:2287`).
-     - in local dev, when this occurs, treat as reset failure and throw so queue retry semantics apply (no `ack()`).
+     - in local dev, when this occurs, treat as reset failure and throw so queue retry semantics apply (no `ack()`), with no fallback branch.
 
 4. Query workflow binding ground truth for the same `idempotencyKey` (`env.<classification_binding>.get(id).status()`):
    - if instance exists and is active/waiting, attempt stop/terminate unconditionally.
