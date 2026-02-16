@@ -156,3 +156,119 @@ For workflow completion:
 - AI/model failure handling: retry at queue level (no `ack()`).
 - Keep approval workflow and route as-is; add separate classification workflow + Wrangler binding.
 - Persist classification by extending `Upload` table (no separate `UploadClassification` table in MVP).
+
+## 11) Detailed implementation steps (for review)
+
+### Phase 1: schema + message contracts
+
+1. Update `Upload` table schema in `src/organization-agent.ts` constructor:
+   - add columns: `eventTime`, `idempotencyKey`, `workflowStatus`, `classificationLabel`, `classificationScore`, `classifiedAt`, `updatedAt`.
+   - keep `name` as primary key.
+   - add additive `alter table` migration logic for existing instances (same style as agent internal additive migrations).
+2. Add/adjust zod row schema in `src/organization-agent.ts` for typed upload rows returned to UI.
+3. Expand websocket message union in `src/organization-agent.ts` and `src/routes/app.$organizationId.upload.tsx`:
+   - keep approval messages unchanged.
+   - add classification-specific events (`classification_workflow_started`, `classification_workflow_skipped`, `classification_updated`, `classification_error`).
+4. Keep existing approval route and message handling untouched except type additions needed for shared union compile correctness.
+
+### Phase 2: upload write path metadata
+
+1. In `src/routes/app.$organizationId.upload.tsx` upload server fn:
+   - generate `idempotencyKey` per upload (`crypto.randomUUID()`).
+   - write to R2 `customMetadata` with `organizationId`, `name`, `idempotencyKey`.
+2. Keep local synthetic queue send path, but include `idempotencyKey` and `eventTime` in message body so local behavior matches production queue contract.
+3. Ensure returned mutation payload includes enough fields for optimistic UI message if needed.
+
+### Phase 3: queue consumer -> agent handoff
+
+1. Update queue handler in `src/worker.ts`:
+   - continue `R2.head(object.key)`.
+   - read `organizationId`, `name`, `idempotencyKey` from object custom metadata.
+   - pass `{ name, eventTime, idempotencyKey }` to agent `onUpload`.
+2. Validation handling:
+   - missing `head` or metadata -> log and `ack()`.
+   - unexpected runtime failure -> do not `ack()`.
+3. Keep explicit per-message `ack()` only on successful terminal processing paths.
+
+### Phase 4: new classification workflow class + binding
+
+1. In `src/organization-agent.ts`:
+   - keep current `OrganizationWorkflow` approval class unchanged.
+   - add new class, e.g. `OrganizationImageClassificationWorkflow extends AgentWorkflow<...>`.
+2. Classification workflow payload fields:
+   - `organizationId`, `name`, `idempotencyKey`, `eventTime`.
+3. Workflow steps (all side effects in `step.do`):
+   - fetch image bytes from R2 (`organizationId/name` key).
+   - call Workers AI `@cf/microsoft/resnet-50` via gateway-enabled path.
+   - select top-1 prediction.
+   - callback to agent method to apply guarded classification write.
+4. Export new workflow class from `src/worker.ts`.
+5. Add workflow binding in `wrangler.jsonc` (local + production env blocks) and regenerate `worker-configuration.d.ts` via `pnpm typecheck`.
+
+### Phase 5: onUpload orchestration + known-state reconciliation
+
+1. Refactor `onUpload` in `src/organization-agent.ts` to accept `{ name, eventTime, idempotencyKey }`.
+2. Implement ordering gate:
+   - load row by `name`.
+   - if incoming `eventTime` older than stored `eventTime`, broadcast skipped + return.
+   - else upsert marker fields (`eventTime`, `idempotencyKey`, `workflowStatus='queued'`, `updatedAt`).
+3. Implement pre-start reconciliation helper (agent method):
+   - inspect `getWorkflow(idempotencyKey)` tracking state.
+   - inspect workflow binding instance status by ID (`env.<classification_binding>.get(id).status()`).
+   - if inconsistent, update row `workflowStatus` and return “not clear”.
+   - only return “clear to start” when both sides indicate no active instance.
+4. Start classification workflow with explicit ID (`idempotencyKey`) only when reconciliation says clear.
+5. Duplicate-ID create or any invariant breach:
+   - treat as failure (throw), no `ack()` in queue path so message retries.
+
+### Phase 6: guarded result apply path
+
+1. Add callable/internal agent method for workflow completion apply, e.g. `applyClassificationResult`.
+2. Input: `{ name, idempotencyKey, label, score, workflowStatus, classifiedAt }`.
+3. Guard:
+   - read current row by `name`.
+   - if row `idempotencyKey !== input.idempotencyKey`, drop as stale.
+4. If guard passes, update:
+   - `classificationLabel`, `classificationScore`, `classifiedAt`, `workflowStatus='complete'`, `updatedAt`.
+5. On workflow error callback (`onWorkflowError`):
+   - update `workflowStatus='errored'` only if row `idempotencyKey` still matches workflow ID.
+
+### Phase 7: workflow callbacks and status mapping
+
+1. In `onWorkflowProgress`/`onWorkflowComplete`/`onWorkflowError`:
+   - branch by workflow name so approval and classification signals remain separate.
+2. Preserve approval callbacks for existing route behavior.
+3. Add classification callback broadcasts used by upload/inspector views.
+4. Update `getUploads()` query to return new classification/status fields for UI.
+
+### Phase 8: UI updates (minimal MVP)
+
+1. `src/routes/app.$organizationId.upload.tsx`:
+   - extend loader data typing to include classification fields.
+   - render classification label/score/status per upload card.
+   - wire new websocket message types to invalidate/refetch and message list formatting.
+2. Leave `src/routes/app.$organizationId.workflow.tsx` approval UX unchanged.
+3. Optional: small updates in `app.$organizationId.inspector.tsx` for status visibility if already workflow-centric.
+
+### Phase 9: failure behavior + retries
+
+1. Ensure queue consumer throws on transient classification/orchestration failures.
+2. Do not emit terminal success messages when start/apply failed.
+3. Rely on queue retry policy (`max_retries` + DLQ) already configured in `wrangler.jsonc`.
+4. Ensure idempotent reprocessing:
+   - repeated message for same marker does not produce duplicate final writes.
+
+### Phase 10: verification checklist
+
+1. Static checks:
+   - `pnpm typecheck`
+   - `pnpm lint`
+2. Manual local flow:
+   - upload image A as `name=x` -> classification appears.
+   - upload new image B as same `name=x` -> classification replaced.
+   - replay old message for A -> no overwrite.
+3. Fault simulation:
+   - force AI call error -> message not acked, retries observed.
+   - simulate create/tracking inconsistency -> reconciliation prevents duplicate starts.
+4. Regression:
+   - approval workflow page still works (`requestApproval`, approve/reject/list unchanged).
