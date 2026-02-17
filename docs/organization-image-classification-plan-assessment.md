@@ -139,3 +139,126 @@ The guard still works correctly — stale writes are dropped because the query r
 ## Verdict
 
 Implementation is **substantially faithful** to the plan. Both gaps involve edge-case resilience rather than core correctness under normal operation. The plan's design constraints around ground-truth verification and explicit invariant-violation handling are the areas where implementation takes shortcuts.
+
+---
+
+## Proposed fix for Gap 1: Create-first with recovery
+
+### Problem recap
+
+`organization-agent.ts:329-331` — `.get(id).catch(() => null)` swallows all errors, treating transient binding failures as "no instance found." This violates the plan's ground-truth invariant: if the binding layer can't confirm whether an instance exists, the reset-first sequence should abort (throw → queue retry).
+
+### Why `.get()` can't distinguish "not found" from transient errors
+
+The Cloudflare docs say only: *"Throws an exception if the instance ID does not exist"* (`workers-api.mdx:348`). No error class, no error code.
+
+Miniflare's implementation (`binding.worker.js:2317-2324`):
+
+```ts
+async get(id) {
+    let stubId = this.env.ENGINE.idFromName(id),
+        stub = this.env.ENGINE.get(stubId),
+        handle = new WorkflowHandle(id, stub);
+    try {
+      await handle.status();
+    } catch {
+      throw new Error("instance.not_found");
+    }
+    return handle;
+}
+```
+
+Miniflare itself catches **all** errors from `handle.status()` (including transient DO communication failures) and remaps them to a single `new Error("instance.not_found")`. So even if we matched on the message string, we'd still conflate the two cases at the miniflare layer.
+
+Production workerd has no documented error type either. The `WorkflowError` interface in `@cloudflare/workers-types` (`{ code?: number; message: string }`) describes `InstanceStatus.error` (a failed workflow's error payload), not what `.get()` throws.
+
+**Conclusion**: `.get()` as a speculative probe is fundamentally unreliable for ground-truth verification.
+
+### Approach: create-first, recover on duplicate
+
+Instead of probing with `.get()` then creating, **attempt `create()` directly**. The `create()` call is itself the existence check:
+
+- If it succeeds → no prior instance existed (or it was already expired). Done.
+- If it throws → an instance with that ID exists. Enter recovery: get → terminate → retry create.
+
+This eliminates the speculative `.get()` entirely. In the recovery path, `.get()` is called only when we **know** the instance exists (because create just told us so), so a failure there is genuinely transient and should propagate.
+
+### Current code (`organization-agent.ts:325-345`)
+
+```ts
+const trackedWorkflow = this.getWorkflow(upload.idempotencyKey);
+if (trackedWorkflow && activeWorkflowStatuses.has(trackedWorkflow.status)) {
+  await this.terminateWorkflow(upload.idempotencyKey);
+}
+const existingInstance = await this.env.OrganizationImageClassificationWorkflow
+  .get(upload.idempotencyKey)
+  .catch(() => null);
+if (existingInstance) {
+  const status = await existingInstance.status();
+  if (activeWorkflowStatuses.has(status.status)) {
+    await existingInstance.terminate();
+  }
+}
+await this.runWorkflow(
+  "OrganizationImageClassificationWorkflow",
+  {
+    idempotencyKey: upload.idempotencyKey,
+    r2ObjectKey: upload.r2ObjectKey,
+  },
+  { id: upload.idempotencyKey },
+);
+```
+
+### Proposed replacement
+
+```ts
+const trackedWorkflow = this.getWorkflow(upload.idempotencyKey);
+if (trackedWorkflow && activeWorkflowStatuses.has(trackedWorkflow.status)) {
+  await this.terminateWorkflow(upload.idempotencyKey);
+}
+try {
+  await this.runWorkflow(
+    "OrganizationImageClassificationWorkflow",
+    {
+      idempotencyKey: upload.idempotencyKey,
+      r2ObjectKey: upload.r2ObjectKey,
+    },
+    { id: upload.idempotencyKey },
+  );
+} catch {
+  const instance = await this.env.OrganizationImageClassificationWorkflow
+    .get(upload.idempotencyKey);
+  const status = await instance.status();
+  if (activeWorkflowStatuses.has(status.status)) {
+    await instance.terminate();
+  }
+  await this.runWorkflow(
+    "OrganizationImageClassificationWorkflow",
+    {
+      idempotencyKey: upload.idempotencyKey,
+      r2ObjectKey: upload.r2ObjectKey,
+    },
+    { id: upload.idempotencyKey },
+  );
+}
+```
+
+### Failure mode analysis
+
+| Scenario | First `create()` | Recovery path | Outcome |
+|---|---|---|---|
+| No prior instance | Succeeds | — | Workflow starts. Correct. |
+| Prior instance exists, active | Throws (duplicate ID) | `.get()` succeeds → terminate → retry create succeeds | Old workflow terminated, new one starts. Correct. |
+| Prior instance exists, completed/expired | Succeeds (ID slot freed) | — | Workflow starts. Correct. |
+| Transient binding error on first `create()` | Throws | `.get()` throws (transient) → **propagates** → queue retry | Safe. No silent swallow. Correct. |
+| First `create()` fails transiently, `.get()` succeeds | Throws | `.get()` returns instance → terminate → retry create | Terminate may be unnecessary (instance may not be the cause), but is harmless. Correct. |
+| Recovery create fails | — | Throws → **propagates** → queue retry | Safe. Correct. |
+| Prior instance terminated between first create throw and recovery `.get()` | Throws | `.get()` throws "not found" → **propagates** → queue retry | Extra retry, but safe. The next queue attempt will succeed via the first-create path. |
+
+### Open questions
+
+1. **Does `runWorkflow` (from agents framework) throw the same error as `env.Workflow.create()`?** `runWorkflow` wraps `create()` and also writes to `cf_agents_workflows` tracking table. Need to verify that the duplicate-ID error from the binding propagates through `runWorkflow` unmodified. If `runWorkflow` catches and re-throws differently, the catch block may need adjustment.
+
+2. **Retry amplification**: The last scenario in the table (instance terminated between create-throw and recovery `.get()`) causes one unnecessary queue retry. This is safe but worth acknowledging — under rapid re-uploads, the queue message may retry once more than strictly necessary.
+
+3. **Agent tracking cleanup**: The current code calls `this.terminateWorkflow()` (agent tracking layer) before the binding layer. The proposed code preserves this. But if `terminateWorkflow` succeeds while the binding still has an active instance (tracking and binding disagree), the first `create()` will still fail on the binding. The recovery path then handles it via the binding. This is correct — the two layers are cleaned up independently.
