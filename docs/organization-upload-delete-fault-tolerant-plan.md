@@ -104,10 +104,15 @@ Extend action handling from only `PutObject` to:
 - `PutObject` (existing path, unchanged)
 - `DeleteObject` and `LifecycleDeletion` (new path)
 
+Interesting to note that we also should handle LifecycleDeletion. I wasn't aware of that.
+
 For delete actions:
 
 1. Do not call `R2.head()` (object may already be gone).
 2. Parse `{ organizationId, name }` from `object.key` (`${organizationId}/${name}`).
+
+Hmmm, I would really like to avoid parsing. Is there any way we can get some meta data to flow through from the delete? I'm trying to understand the flow conceptually. The r2 delete kicks things off and by the time the queue dispatches the r2 notification, the r2 object is probably long gone. So it's unclear how we would get something like a idempotencyKey. Is that even needed? I think we need organizationId so we can get the correct agent.
+
 3. Pass `{ name, eventTime, r2ObjectKey, action }` to new agent RPC `onDelete`.
 4. `ack()` terminal validation failures.
 5. `retry()` on transient failures.
@@ -131,6 +136,8 @@ Stale safety invariant:
 
 - Newer upload wins over older delayed delete.
 - Existing upload recency marker (`Upload.eventTime`) already supports this.
+
+This seems to be missing workflow, right? We should clean up any workflow before deleting?
 
 ## 4) API/UI delete entrypoint (`src/routes/app.$organizationId.upload.tsx`)
 
@@ -172,6 +179,9 @@ Doc basis:
 
 Source: `refs/cloudflare-docs/src/content/docs/r2/buckets/event-notifications.mdx:68`
 
+
+This probably needs to be mentioned in the README.md in the deploy section
+
 ## 7) Fault tolerance properties after change
 
 1. Duplicate delete messages:
@@ -211,8 +221,13 @@ Source: `src/organization-agent.ts:365`
 ## Open questions
 
 1. Should delete be hard delete only (remove from DB list), or keep tombstones/history (`deletedAt`) for audit?
+hard delete
 2. Should user-triggered delete be blocked while classification is running, or allow immediate delete and let stale workflow writes noop?
+immediate delete
 3. Do you want delete notifications in UI messages panel (`upload_deleted`), or silent invalidate only?
+silent
 4. Should we also process `LifecycleDeletion` events now, or only `DeleteObject` for user actions?
+Can we handle both easily? It should be separate code paths, right?
 5. For local dev, if workflow termination is needed in future cleanup logic, should we fail-fast (current style) or best-effort skip?
+I'm not quite following. we do want to be able to get through a delete in local dev. What are the specific issues
 
