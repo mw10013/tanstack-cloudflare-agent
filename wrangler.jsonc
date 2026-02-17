@@ -38,6 +38,11 @@
       "name": "OrganizationWorkflow",
       "binding": "OrganizationWorkflow",
       "class_name": "OrganizationWorkflow"
+    },
+    {
+      "name": "OrganizationImageClassificationWorkflow",
+      "binding": "OrganizationImageClassificationWorkflow",
+      "class_name": "OrganizationImageClassificationWorkflow"
     }
   ],
   "migrations": [
@@ -161,6 +166,11 @@
           "name": "OrganizationWorkflow",
           "binding": "OrganizationWorkflow",
           "class_name": "OrganizationWorkflow"
+        },
+        {
+          "name": "OrganizationImageClassificationWorkflow",
+          "binding": "OrganizationImageClassificationWorkflow",
+          "class_name": "OrganizationImageClassificationWorkflow"
         }
       ],
       "migrations": [

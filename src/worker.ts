@@ -2,14 +2,19 @@ import type { AuthService } from "@/lib/auth-service";
 import type { Repository } from "@/lib/repository";
 import type { StripeService } from "@/lib/stripe-service";
 import serverEntry from "@tanstack/react-start/server-entry";
-import { routeAgentRequest } from "agents";
+import { getAgentByName, routeAgentRequest } from "agents";
+import * as z from "zod";
 import { createAuthService } from "@/lib/auth-service";
 import { createD1SessionService } from "@/lib/d1-session-service";
 import { createRepository } from "@/lib/repository";
 import { createStripeService } from "@/lib/stripe-service";
 import { extractAgentName } from "./organization-agent";
 
-export { OrganizationAgent, OrganizationWorkflow } from "./organization-agent";
+export {
+  OrganizationAgent,
+  OrganizationWorkflow,
+  OrganizationImageClassificationWorkflow,
+} from "./organization-agent";
 
 export interface ServerContext {
   env: Env;
@@ -127,13 +132,29 @@ export default {
 
   async queue(batch, env) {
     for (const message of batch.messages) {
-      const notification = message.body as {
-        account: string;
-        action: string;
-        bucket: string;
-        object: { key: string; size: number; eTag: string };
-        eventTime: string;
-      };
+      const parsed = z
+        .object({
+          action: z.string().min(1),
+          object: z.object({
+            key: z.string().min(1),
+          }),
+          eventTime: z.string().min(1),
+        })
+        .safeParse(message.body);
+      if (!parsed.success) {
+        console.error("Invalid R2 queue message body", {
+          messageId: message.id,
+          issues: parsed.error.issues,
+          body: message.body,
+        });
+        message.ack();
+        continue;
+      }
+      const notification = parsed.data;
+      if (notification.action !== "PutObject") {
+        message.ack();
+        continue;
+      }
       const head = await env.R2.head(notification.object.key);
       if (!head) {
         console.warn(
@@ -145,7 +166,8 @@ export default {
       }
       const organizationId = head.customMetadata?.organizationId;
       const name = head.customMetadata?.name;
-      if (!organizationId || !name) {
+      const idempotencyKey = head.customMetadata?.idempotencyKey;
+      if (!organizationId || !name || !idempotencyKey) {
         console.error(
           "Missing customMetadata on R2 object:",
           notification.object.key,
@@ -153,10 +175,28 @@ export default {
         message.ack();
         continue;
       }
-      const id = env.ORGANIZATION_AGENT.idFromName(organizationId);
-      const stub = env.ORGANIZATION_AGENT.get(id);
-      await stub.onUpload({ name });
-      message.ack();
+      const stub = await getAgentByName(env.ORGANIZATION_AGENT, organizationId);
+      try {
+        await stub.onUpload({
+          name,
+          eventTime: notification.eventTime,
+          idempotencyKey,
+          r2ObjectKey: notification.object.key,
+        });
+        message.ack();
+      } catch (error) {
+        const msg = error instanceof Error
+          ? `${error.name}: ${error.message}\n${error.stack ?? ""}`
+          : String(error);
+        console.error("queue onUpload failed", {
+          key: notification.object.key,
+          organizationId,
+          name,
+          idempotencyKey,
+          error: msg,
+        });
+        message.retry();
+      }
     }
   },
 } satisfies ExportedHandler<Env>;

@@ -150,6 +150,7 @@ pnpm dlx shadcn@latest add https://ai-sdk.dev/elements/api/registry/all.json
 ## Llms
 
 ```
+ln -s AGENTS.md CLAUDE.md
 pnpm add -g @playwright/cli@latest
 ```
 

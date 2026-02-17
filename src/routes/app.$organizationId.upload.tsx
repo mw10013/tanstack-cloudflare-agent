@@ -1,4 +1,8 @@
 import type { OrganizationAgent } from "@/organization-agent";
+import {
+  organizationMessageSchema,
+  type OrganizationMessage,
+} from "@/organization-messages";
 import { invariant } from "@epic-web/invariant";
 import { useForm } from "@tanstack/react-form";
 import { useMutation } from "@tanstack/react-query";
@@ -40,22 +44,11 @@ const organizationIdSchema = z.object({
   organizationId: z.string().min(1),
 });
 
-const organizationMessageSchema = z.discriminatedUnion("type", [
-  z.object({ type: z.literal("upload_complete"), name: z.string(), createdAt: z.number() }),
-  z.object({ type: z.literal("upload_error"), name: z.string(), error: z.string() }),
-  z.object({ type: z.literal("workflow_progress"), workflowId: z.string(), progress: z.object({ status: z.string(), message: z.string() }) }),
-  z.object({ type: z.literal("workflow_complete"), workflowId: z.string(), result: z.object({ approved: z.boolean() }).optional() }),
-  z.object({ type: z.literal("workflow_error"), workflowId: z.string(), error: z.string() }),
-  z.object({ type: z.literal("approval_requested"), workflowId: z.string(), title: z.string() }),
-]);
-
-type OrganizationMessage = z.infer<typeof organizationMessageSchema>;
-
 const uploadNameSchema = z
   .string()
   .trim()
   .min(1, "Name is required")
-  .regex(/^[A-Za-z_-]+$/, "Name can only contain letters, underscores, and hyphens");
+  .regex(/^[A-Za-z0-9_-]+$/, "Name can only contain letters, numbers, underscores, and hyphens");
 
 const imageMimeTypes = ["image/png", "image/jpeg", "image/webp", "image/gif"];
 
@@ -83,9 +76,10 @@ const uploadFile = createServerFn({ method: "POST" })
     const organizationId = session.session.activeOrganizationId;
     invariant(organizationId, "Missing active organization");
     const key = `${organizationId}/${data.name}`;
+    const idempotencyKey = crypto.randomUUID();
     await env.R2.put(key, data.file, {
       httpMetadata: { contentType: data.file.type },
-      customMetadata: { organizationId, name: data.name },
+      customMetadata: { organizationId, name: data.name, idempotencyKey },
     });
     if (env.ENVIRONMENT === "local") {
       await env.R2_UPLOAD_QUEUE.send({
@@ -94,9 +88,10 @@ const uploadFile = createServerFn({ method: "POST" })
         bucket: env.R2_BUCKET_NAME,
         object: { key, size: data.file.size, eTag: "local" },
         eventTime: new Date().toISOString(),
+        idempotencyKey,
       });
     }
-    return { success: true, name: data.name, size: data.file.size };
+    return { success: true, name: data.name, size: data.file.size, idempotencyKey };
   });
 
 const getUploads = createServerFn({ method: "GET" })
@@ -109,10 +104,7 @@ const getUploads = createServerFn({ method: "GET" })
     );
     const id = env.ORGANIZATION_AGENT.idFromName(organizationId);
     const stub = env.ORGANIZATION_AGENT.get(id);
-    const uploads = (await stub.getUploads()) as unknown as {
-      name: string;
-      createdAt: number;
-    }[];
+    const uploads = await stub.getUploads();
     if (env.ENVIRONMENT === "local") {
       return uploads.map((upload) => ({
         ...upload,
@@ -165,7 +157,10 @@ function RouteComponent() {
       const result = organizationMessageSchema.safeParse(JSON.parse(String(event.data)));
       if (!result.success) return;
       setMessages((prev) => [result.data, ...prev]);
-      if (result.data.type === "upload_complete") {
+      if (
+        result.data.type === "classification_updated" ||
+        result.data.type === "classification_error"
+      ) {
         void router.invalidate();
       }
     },
@@ -209,7 +204,7 @@ function RouteComponent() {
           <CardHeader>
             <CardTitle>Upload Image</CardTitle>
             <CardDescription>
-              Use letters, underscores, or hyphens for names.
+              Use letters, numbers, underscores, or hyphens for names.
             </CardDescription>
           </CardHeader>
           <CardContent>
@@ -336,8 +331,11 @@ function RouteComponent() {
                   </div>
                   <div className="min-w-0">
                     <p className="truncate text-sm font-medium">{upload.name}</p>
-                    <p className="text-muted-foreground text-xs">
-                      {new Date(upload.createdAt).toLocaleString()}
+                    <p className="text-muted-foreground text-xs">{new Date(upload.createdAt).toLocaleString()}</p>
+                    <p className="text-muted-foreground truncate text-xs">
+                      {upload.classificationLabel
+                        ? `${upload.classificationLabel} (${String(Math.round((upload.classificationScore ?? 0) * 100))}%)`
+                        : "Classifying..."}
                     </p>
                   </div>
                 </div>
@@ -380,8 +378,6 @@ function Messages({ messages }: { messages: OrganizationMessage[] }) {
 
 function MessageIcon({ type }: { type: OrganizationMessage["type"] }) {
   switch (type) {
-    case "upload_complete":
-      return <Check className="text-green-600 size-4" />;
     case "upload_error":
       return <XCircle className="text-destructive size-4" />;
     case "workflow_progress":
@@ -392,13 +388,17 @@ function MessageIcon({ type }: { type: OrganizationMessage["type"] }) {
       return <XCircle className="text-destructive size-4" />;
     case "approval_requested":
       return <Info className="text-blue-600 size-4" />;
+    case "classification_workflow_started":
+      return <CircleDot className="text-yellow-600 size-4" />;
+    case "classification_updated":
+      return <Check className="text-green-600 size-4" />;
+    case "classification_error":
+      return <XCircle className="text-destructive size-4" />;
   }
 }
 
 function formatMessage(msg: OrganizationMessage): string {
   switch (msg.type) {
-    case "upload_complete":
-      return `${msg.name} uploaded`;
     case "upload_error":
       return `${msg.name} failed: ${msg.error}`;
     case "workflow_progress":
@@ -409,5 +409,11 @@ function formatMessage(msg: OrganizationMessage): string {
       return `Workflow error: ${msg.error}`;
     case "approval_requested":
       return `Approval requested: ${msg.title}`;
+    case "classification_workflow_started":
+      return `Classification started: ${msg.name}`;
+    case "classification_updated":
+      return `${msg.name}: ${msg.label} (${String(Math.round(msg.score * 100))}%)`;
+    case "classification_error":
+      return `Classification error: ${msg.name} - ${msg.error}`;
   }
 }

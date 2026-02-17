@@ -12,6 +12,7 @@ import { convertToModelMessages, generateText, streamText } from "ai";
 import { createOpenAI } from "ai-gateway-provider/providers/openai";
 import { createWorkersAI } from "workers-ai-provider";
 import * as z from "zod";
+import { type OrganizationMessage } from "@/organization-messages";
 
 const AgentState = z.object({
   id: z.string(),
@@ -81,6 +82,25 @@ const ChatStreamMetadata = z.object({
 });
 export type ChatStreamMetadata = z.infer<typeof ChatStreamMetadata>;
 
+const UploadRow = z.object({
+  name: z.string(),
+  createdAt: z.number(),
+  eventTime: z.number(),
+  idempotencyKey: z.string(),
+  classificationLabel: z.string().nullable(),
+  classificationScore: z.number().nullable(),
+  classifiedAt: z.number().nullable(),
+});
+export type UploadRow = z.infer<typeof UploadRow>;
+
+const activeWorkflowStatuses = new Set([
+  "queued",
+  "running",
+  "waiting",
+  "waitingForPause",
+  "paused",
+]);
+
 export const extractAgentName = (request: Request) => {
   const { pathname } = new URL(request.url);
   const segments = pathname.split("/").filter(Boolean);
@@ -99,16 +119,6 @@ export interface ApprovalRequestInfo {
   resolvedAt?: string;
   reason?: string;
 }
-
-export const organizationMessageSchema = z.discriminatedUnion("type", [
-  z.object({ type: z.literal("upload_complete"), name: z.string(), createdAt: z.number() }),
-  z.object({ type: z.literal("upload_error"), name: z.string(), error: z.string() }),
-  z.object({ type: z.literal("workflow_progress"), workflowId: z.string(), progress: z.object({ status: z.string(), message: z.string() }) }),
-  z.object({ type: z.literal("workflow_complete"), workflowId: z.string(), result: z.object({ approved: z.boolean() }).optional() }),
-  z.object({ type: z.literal("workflow_error"), workflowId: z.string(), error: z.string() }),
-  z.object({ type: z.literal("approval_requested"), workflowId: z.string(), title: z.string() }),
-]);
-export type OrganizationMessage = z.infer<typeof organizationMessageSchema>;
 
 export class OrganizationWorkflow extends AgentWorkflow<
   OrganizationAgent,
@@ -172,11 +182,69 @@ export class OrganizationWorkflow extends AgentWorkflow<
   }
 }
 
+export class OrganizationImageClassificationWorkflow extends AgentWorkflow<
+  OrganizationAgent,
+  { idempotencyKey: string; r2ObjectKey: string },
+  { status: string; message: string }
+> {
+  async run(
+    event: AgentWorkflowEvent<{ idempotencyKey: string; r2ObjectKey: string }>,
+    step: AgentWorkflowStep,
+  ): Promise<{ idempotencyKey: string; label: string; score: number }> {
+    const { idempotencyKey, r2ObjectKey } = event.payload;
+    await this.reportProgress({
+      status: "running",
+      message: `Classifying ${r2ObjectKey}`,
+    });
+    const bytes = await step.do("load-image-bytes", async () => {
+      const object = await this.env.R2.get(r2ObjectKey);
+      const body = object?.body;
+      if (!body) {
+        throw new Error(`R2 object not found: ${r2ObjectKey}`);
+      }
+      const arr = new Uint8Array(await new Response(body).arrayBuffer());
+      return Array.from(arr);
+    });
+    const top = await step.do("classify-image", async () => {
+      const response = await this.env.AI.run(
+        "@cf/microsoft/resnet-50",
+        { image: bytes },
+        {
+          gateway: {
+            id: this.env.AI_GATEWAY_ID,
+            skipCache: false,
+            cacheTtl: 7 * 24 * 60 * 60,
+          },
+        },
+      );
+      const predictions = z.array(z.object({ label: z.string(), score: z.number() })).min(1).parse(response);
+      const first = predictions[0];
+      return first;
+    });
+    await step.do("apply-classification-result", async () => {
+      await this.agent.applyClassificationResult({
+        idempotencyKey,
+        label: top.label,
+        score: top.score,
+      });
+    });
+    return { idempotencyKey, label: top.label, score: top.score };
+  }
+}
+
 export class OrganizationAgent extends AIChatAgent<Env> {
   constructor(ctx: AgentContext, env: Env) {
     super(ctx, env);
     void this
-      .sql`create table if not exists Upload (name text primary key, createdAt integer not null)`;
+      .sql`create table if not exists Upload (
+        name text primary key,
+        createdAt integer not null,
+        eventTime integer not null,
+        idempotencyKey text not null,
+        classificationLabel text,
+        classificationScore real,
+        classifiedAt integer
+      )`;
   }
 
   ping() {
@@ -196,16 +264,124 @@ export class OrganizationAgent extends AIChatAgent<Env> {
     this.broadcast(JSON.stringify(msg));
   }
 
-  onUpload(upload: { name: string }) {
-    const createdAt = Date.now();
-    void this.sql`insert or replace into Upload (name, createdAt)
-      values (${upload.name}, ${createdAt})`;
-    this.broadcastMessage({ type: "upload_complete", name: upload.name, createdAt });
+  /**
+   * Reset-first workflow orchestration for upload classification.
+   * Always perform both cleanup layers before start:
+   * 1) agent-tracked workflow control APIs
+   * 2) workflow binding status/termination as ground truth
+   * This is required because workflow instance creation and tracking insert are non-atomic.
+   * Even when a tracked workflow exists, always verify against the binding because
+   * helper tracking and workflow instance lifecycle are non-atomic.
+   * Do not special-case local development here: workflow control helpers may throw
+   * "not implemented" in local dev and that failure is intentional so queue retries
+   * and eventual DLQ preserve reset-first invariants.
+   * If reset cannot be guaranteed, throw so queue retries and eventual DLQ preserve invariants.
+   */
+  async onUpload(upload: {
+    name: string;
+    eventTime: string;
+    idempotencyKey: string;
+    r2ObjectKey: string;
+  }) {
+    const eventTime = Date.parse(upload.eventTime);
+    if (!Number.isFinite(eventTime)) {
+      throw new Error(`Invalid eventTime: ${upload.eventTime}`);
+    }
+    const existing = UploadRow.nullable().parse(this
+      .sql<UploadRow>`select * from Upload where name = ${upload.name}`[0] ?? null);
+    if (existing && eventTime < existing.eventTime) {
+      console.log("classification workflow skipped for stale upload event", {
+        name: upload.name,
+        idempotencyKey: upload.idempotencyKey,
+      });
+      return;
+    }
+    void this.sql`
+      insert into Upload (
+        name,
+        createdAt,
+        eventTime,
+        idempotencyKey,
+        classificationLabel,
+        classificationScore,
+        classifiedAt
+      ) values (
+        ${upload.name},
+        ${eventTime},
+        ${eventTime},
+        ${upload.idempotencyKey},
+        null,
+        null,
+        null
+      )
+      on conflict(name) do update set
+        createdAt = excluded.createdAt,
+        eventTime = excluded.eventTime,
+        idempotencyKey = excluded.idempotencyKey,
+        classificationLabel = null,
+        classificationScore = null,
+        classifiedAt = null
+    `;
+    const trackedWorkflow = this.getWorkflow(upload.idempotencyKey);
+    if (trackedWorkflow && activeWorkflowStatuses.has(trackedWorkflow.status)) {
+      await this.terminateWorkflow(upload.idempotencyKey);
+    }
+    const existingInstance = await this.env.OrganizationImageClassificationWorkflow
+      .get(upload.idempotencyKey)
+      .catch(() => null);
+    if (existingInstance) {
+      const status = await existingInstance.status();
+      if (activeWorkflowStatuses.has(status.status)) {
+        await existingInstance.terminate();
+      }
+    }
+    await this.runWorkflow(
+      "OrganizationImageClassificationWorkflow",
+      {
+        idempotencyKey: upload.idempotencyKey,
+        r2ObjectKey: upload.r2ObjectKey,
+      },
+      { id: upload.idempotencyKey },
+    );
+    this.broadcastMessage({
+      type: "classification_workflow_started",
+      name: upload.name,
+      idempotencyKey: upload.idempotencyKey,
+    });
+  }
+
+  applyClassificationResult(input: {
+    idempotencyKey: string;
+    label: string;
+    score: number;
+  }) {
+    const classifiedAt = Date.now();
+    const updated = this.sql<{ name: string; idempotencyKey: string }>`
+      update Upload
+      set classificationLabel = ${input.label},
+          classificationScore = ${input.score},
+          classifiedAt = ${classifiedAt}
+      where idempotencyKey = ${input.idempotencyKey}
+      returning name, idempotencyKey
+    `;
+    if (updated.length === 0) {
+      return;
+    }
+    const row = updated[0];
+    this.broadcastMessage({
+      type: "classification_updated",
+      name: row.name,
+      idempotencyKey: row.idempotencyKey,
+      label: input.label,
+      score: input.score,
+    });
   }
 
   @callable()
   getUploads() {
-    return this.sql`select * from Upload order by createdAt desc`;
+    return UploadRow.array().parse(
+      this.sql`select * from Upload order by createdAt desc`,
+    );
   }
 
   getAgentState() {
@@ -304,29 +480,57 @@ export class OrganizationAgent extends AIChatAgent<Env> {
 
   // eslint-disable-next-line @typescript-eslint/require-await
   async onWorkflowProgress(
-    _workflowName: string,
+    workflowName: string,
     workflowId: string,
-    progress: { status: "pending" | "approved" | "rejected"; message: string },
+    progress: unknown,
   ): Promise<void> {
-    this.broadcastMessage({ type: "workflow_progress", workflowId, progress });
+    if (workflowName !== "OrganizationWorkflow") {
+      return;
+    }
+    const approvalProgress = z.object({
+      status: z.enum(["pending", "approved", "rejected"]),
+      message: z.string(),
+    }).parse(progress);
+    this.broadcastMessage({ type: "workflow_progress", workflowId, progress: approvalProgress });
   }
 
   // eslint-disable-next-line @typescript-eslint/require-await
   async onWorkflowComplete(
-    _workflowName: string,
+    workflowName: string,
     workflowId: string,
-    result?: { approved: boolean },
+    result?: unknown,
   ): Promise<void> {
-    this.broadcastMessage({ type: "workflow_complete", workflowId, result });
+    if (workflowName !== "OrganizationWorkflow") {
+      return;
+    }
+    const approvalResult = z.object({ approved: z.boolean() }).optional().parse(result);
+    this.broadcastMessage({ type: "workflow_complete", workflowId, result: approvalResult });
   }
 
   // eslint-disable-next-line @typescript-eslint/require-await
   async onWorkflowError(
-    _workflowName: string,
+    workflowName: string,
     workflowId: string,
     error: string,
   ): Promise<void> {
-    this.broadcastMessage({ type: "workflow_error", workflowId, error });
+    if (workflowName === "OrganizationWorkflow") {
+      this.broadcastMessage({ type: "workflow_error", workflowId, error });
+      return;
+    }
+    if (workflowName !== "OrganizationImageClassificationWorkflow") {
+      return;
+    }
+    const row = UploadRow.nullable().parse(this
+      .sql<UploadRow>`select * from Upload where idempotencyKey = ${workflowId}`[0] ?? null);
+    if (row?.idempotencyKey !== workflowId) {
+      return;
+    }
+    this.broadcastMessage({
+      type: "classification_error",
+      name: row.name,
+      idempotencyKey: workflowId,
+      error,
+    });
   }
 
   @callable()

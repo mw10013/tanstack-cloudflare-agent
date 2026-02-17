@@ -1,5 +1,5 @@
 import type { OrganizationAgent } from "@/organization-agent";
-import { organizationMessageSchema } from "@/organization-agent";
+import { organizationMessageSchema } from "@/organization-messages";
 import { useForm } from "@tanstack/react-form";
 import { useMutation } from "@tanstack/react-query";
 import {
