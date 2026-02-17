@@ -136,10 +136,20 @@ Stale safety invariant:
 - Existing upload recency marker (`Upload.eventTime`) already supports this.
 Workflow handling for delete:
 
-- MVP: do not block delete on workflow termination.
-- Reason 1: correctness is preserved without termination because classification result write is guarded by `idempotencyKey` and becomes a no-op once row is deleted (`update ... where idempotencyKey = ?`).
-- Reason 2: Agents `terminateWorkflow()` is not supported in local dev and would make local deletes fail/retry indefinitely if required in the critical path.
-- Optional optimization follow-up: best-effort terminate in production only, non-blocking, before/after row deletion.
+- Single path for all environments:
+  - attempt workflow termination if a related active workflow is found
+  - wrap termination in `try/catch`
+  - never throw from termination failures
+  - continue delete flow in all cases
+- Reason 1: correctness is preserved even when termination fails, because classification result write is guarded by `idempotencyKey` and becomes a no-op once row is deleted (`update ... where idempotencyKey = ?`).
+- Reason 2: this avoids environment-specific branching while still allowing local dev (where terminate may be unsupported) to complete deletes.
+
+Why `onUpload()` pattern is different:
+
+- `onUpload()` must ensure a new classification workflow can start with a deterministic ID (`idempotencyKey`), so it performs active-workflow cleanup before `runWorkflow()`.
+- That cleanup is part of "start-new-workflow correctness", not "data-delete correctness".
+- Delete already reaches correct state by removing the row; classification callbacks after that are no-op by design (`update ... where idempotencyKey = ?`).
+- So we can do similar termination mechanics as best-effort in the same unified path, not as a required success condition.
 
 I agree that we can't let this block local dev. Take a look at onUpload(). It seems to have a way to terminate an existing workflow, if any. Can we do something similar? Analyze it carefully and tell me what you think.
 
