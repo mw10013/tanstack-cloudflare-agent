@@ -265,17 +265,15 @@ export class OrganizationAgent extends AIChatAgent<Env> {
   }
 
   /**
-   * Reset-first workflow orchestration for upload classification.
-   * Always perform both cleanup layers before start:
-   * 1) agent-tracked workflow control APIs
-   * 2) workflow binding status/termination as ground truth
-   * This is required because workflow instance creation and tracking insert are non-atomic.
-   * Even when a tracked workflow exists, always verify against the binding because
-   * helper tracking and workflow instance lifecycle are non-atomic.
-   * Do not special-case local development here: workflow control helpers may throw
-   * "not implemented" in local dev and that failure is intentional so queue retries
-   * and eventual DLQ preserve reset-first invariants.
-   * If reset cannot be guaranteed, throw so queue retries and eventual DLQ preserve invariants.
+   * Create-first workflow orchestration for upload classification.
+   * 1) Clean up agent-tracked workflow if active.
+   * 2) Attempt workflow creation directly — create() itself is the existence check.
+   * 3) On duplicate-ID failure, enter recovery: get → terminate → retry create.
+   *    In recovery, .get() is only called when we know the instance exists, so any
+   *    failure is genuinely transient and propagates (no silent swallow).
+   * Avoids speculative .get() probing because the binding throws the same error for
+   * "not found" and transient failures (undocumented, confirmed in miniflare source).
+   * If any step in recovery fails, throw so queue retries preserve invariants.
    */
   async onUpload(upload: {
     name: string;
@@ -326,23 +324,30 @@ export class OrganizationAgent extends AIChatAgent<Env> {
     if (trackedWorkflow && activeWorkflowStatuses.has(trackedWorkflow.status)) {
       await this.terminateWorkflow(upload.idempotencyKey);
     }
-    const existingInstance = await this.env.OrganizationImageClassificationWorkflow
-      .get(upload.idempotencyKey)
-      .catch(() => null);
-    if (existingInstance) {
-      const status = await existingInstance.status();
+    const workflowParams = {
+      idempotencyKey: upload.idempotencyKey,
+      r2ObjectKey: upload.r2ObjectKey,
+    } as const;
+    const workflowOpts = { id: upload.idempotencyKey } as const;
+    try {
+      await this.runWorkflow(
+        "OrganizationImageClassificationWorkflow",
+        workflowParams,
+        workflowOpts,
+      );
+    } catch {
+      const instance = await this.env.OrganizationImageClassificationWorkflow
+        .get(upload.idempotencyKey);
+      const status = await instance.status();
       if (activeWorkflowStatuses.has(status.status)) {
-        await existingInstance.terminate();
+        await instance.terminate();
       }
+      await this.runWorkflow(
+        "OrganizationImageClassificationWorkflow",
+        workflowParams,
+        workflowOpts,
+      );
     }
-    await this.runWorkflow(
-      "OrganizationImageClassificationWorkflow",
-      {
-        idempotencyKey: upload.idempotencyKey,
-        r2ObjectKey: upload.r2ObjectKey,
-      },
-      { id: upload.idempotencyKey },
-    );
     this.broadcastMessage({
       type: "classification_workflow_started",
       name: upload.name,
