@@ -240,7 +240,7 @@ export class OrganizationAgent extends AIChatAgent<Env> {
         name text primary key,
         createdAt integer not null,
         eventTime integer not null,
-        idempotencyKey text not null,
+        idempotencyKey text not null unique,
         classificationLabel text,
         classificationScore real,
         classifiedAt integer
