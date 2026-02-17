@@ -35,7 +35,7 @@ Feasible with current stack (TanStack Start + Agents + Workflows + R2 + Queue). 
 ## Evidence Excerpts
 
 - Queue duplicates: “at least once delivery” and “may be delivered more than once” (`refs/cloudflare-docs/src/content/docs/queues/reference/delivery-guarantees.mdx:13`).
-- Explicit ack semantics: “call the `ack()` method on the message” (`refs/cloudflare-docs/src/content/docs/queues/configuration/batching-retries.mdx:63`).
+- Explicit ack semantics: “call the `ack()` method on the message” (`refs/cloudflare-docs/src/content/docs/queues/configuration/bxatching-retries.mdx:63`).
 - Workflow side effects guidance: “side effects outside of steps… may be duplicated” (`refs/cloudflare-docs/src/content/docs/workflows/build/rules-of-workflows.mdx:220`).
 - Workflow `create` with custom ID can throw if ID exists (`refs/cloudflare-docs/src/content/docs/workflows/build/workers-api.mdx:277`).
 - R2 notification includes `eventTime` (`refs/cloudflare-docs/src/content/docs/r2/buckets/event-notifications.mdx:103`).
