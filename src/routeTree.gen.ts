@@ -29,9 +29,11 @@ import { Route as AppOrganizationIdUploadRouteImport } from './routes/app.$organ
 import { Route as AppOrganizationIdMembersRouteImport } from './routes/app.$organizationId.members'
 import { Route as AppOrganizationIdInvitationsRouteImport } from './routes/app.$organizationId.invitations'
 import { Route as AppOrganizationIdInspectorRouteImport } from './routes/app.$organizationId.inspector'
+import { Route as AppOrganizationIdGoogleRouteImport } from './routes/app.$organizationId.google'
 import { Route as AppOrganizationIdChatRouteImport } from './routes/app.$organizationId.chat'
 import { Route as AppOrganizationIdBillingRouteImport } from './routes/app.$organizationId.billing'
 import { Route as AppOrganizationIdAgentRouteImport } from './routes/app.$organizationId.agent'
+import { Route as ApiGoogleCallbackRouteImport } from './routes/api/google/callback'
 import { Route as ApiAuthSplatRouteImport } from './routes/api/auth/$'
 import { Route as ApiOrgOrganizationIdUploadImageNameRouteImport } from './routes/api/org.$organizationId.upload-image.$name'
 import { Route as ApiE2eDeleteUserEmailRouteImport } from './routes/api/e2e/delete/user/$email'
@@ -139,6 +141,11 @@ const AppOrganizationIdInspectorRoute =
     path: '/inspector',
     getParentRoute: () => AppOrganizationIdRoute,
   } as any)
+const AppOrganizationIdGoogleRoute = AppOrganizationIdGoogleRouteImport.update({
+  id: '/google',
+  path: '/google',
+  getParentRoute: () => AppOrganizationIdRoute,
+} as any)
 const AppOrganizationIdChatRoute = AppOrganizationIdChatRouteImport.update({
   id: '/chat',
   path: '/chat',
@@ -154,6 +161,11 @@ const AppOrganizationIdAgentRoute = AppOrganizationIdAgentRouteImport.update({
   id: '/agent',
   path: '/agent',
   getParentRoute: () => AppOrganizationIdRoute,
+} as any)
+const ApiGoogleCallbackRoute = ApiGoogleCallbackRouteImport.update({
+  id: '/api/google/callback',
+  path: '/api/google/callback',
+  getParentRoute: () => rootRouteImport,
 } as any)
 const ApiAuthSplatRoute = ApiAuthSplatRouteImport.update({
   id: '/api/auth/$',
@@ -187,9 +199,11 @@ export interface FileRoutesByFullPath {
   '/admin/': typeof AdminIndexRoute
   '/app/': typeof AppIndexRoute
   '/api/auth/$': typeof ApiAuthSplatRoute
+  '/api/google/callback': typeof ApiGoogleCallbackRoute
   '/app/$organizationId/agent': typeof AppOrganizationIdAgentRoute
   '/app/$organizationId/billing': typeof AppOrganizationIdBillingRoute
   '/app/$organizationId/chat': typeof AppOrganizationIdChatRoute
+  '/app/$organizationId/google': typeof AppOrganizationIdGoogleRoute
   '/app/$organizationId/inspector': typeof AppOrganizationIdInspectorRoute
   '/app/$organizationId/invitations': typeof AppOrganizationIdInvitationsRoute
   '/app/$organizationId/members': typeof AppOrganizationIdMembersRoute
@@ -211,9 +225,11 @@ export interface FileRoutesByTo {
   '/admin': typeof AdminIndexRoute
   '/app': typeof AppIndexRoute
   '/api/auth/$': typeof ApiAuthSplatRoute
+  '/api/google/callback': typeof ApiGoogleCallbackRoute
   '/app/$organizationId/agent': typeof AppOrganizationIdAgentRoute
   '/app/$organizationId/billing': typeof AppOrganizationIdBillingRoute
   '/app/$organizationId/chat': typeof AppOrganizationIdChatRoute
+  '/app/$organizationId/google': typeof AppOrganizationIdGoogleRoute
   '/app/$organizationId/inspector': typeof AppOrganizationIdInspectorRoute
   '/app/$organizationId/invitations': typeof AppOrganizationIdInvitationsRoute
   '/app/$organizationId/members': typeof AppOrganizationIdMembersRoute
@@ -240,9 +256,11 @@ export interface FileRoutesById {
   '/admin/': typeof AdminIndexRoute
   '/app/': typeof AppIndexRoute
   '/api/auth/$': typeof ApiAuthSplatRoute
+  '/api/google/callback': typeof ApiGoogleCallbackRoute
   '/app/$organizationId/agent': typeof AppOrganizationIdAgentRoute
   '/app/$organizationId/billing': typeof AppOrganizationIdBillingRoute
   '/app/$organizationId/chat': typeof AppOrganizationIdChatRoute
+  '/app/$organizationId/google': typeof AppOrganizationIdGoogleRoute
   '/app/$organizationId/inspector': typeof AppOrganizationIdInspectorRoute
   '/app/$organizationId/invitations': typeof AppOrganizationIdInvitationsRoute
   '/app/$organizationId/members': typeof AppOrganizationIdMembersRoute
@@ -269,9 +287,11 @@ export interface FileRouteTypes {
     | '/admin/'
     | '/app/'
     | '/api/auth/$'
+    | '/api/google/callback'
     | '/app/$organizationId/agent'
     | '/app/$organizationId/billing'
     | '/app/$organizationId/chat'
+    | '/app/$organizationId/google'
     | '/app/$organizationId/inspector'
     | '/app/$organizationId/invitations'
     | '/app/$organizationId/members'
@@ -293,9 +313,11 @@ export interface FileRouteTypes {
     | '/admin'
     | '/app'
     | '/api/auth/$'
+    | '/api/google/callback'
     | '/app/$organizationId/agent'
     | '/app/$organizationId/billing'
     | '/app/$organizationId/chat'
+    | '/app/$organizationId/google'
     | '/app/$organizationId/inspector'
     | '/app/$organizationId/invitations'
     | '/app/$organizationId/members'
@@ -321,9 +343,11 @@ export interface FileRouteTypes {
     | '/admin/'
     | '/app/'
     | '/api/auth/$'
+    | '/api/google/callback'
     | '/app/$organizationId/agent'
     | '/app/$organizationId/billing'
     | '/app/$organizationId/chat'
+    | '/app/$organizationId/google'
     | '/app/$organizationId/inspector'
     | '/app/$organizationId/invitations'
     | '/app/$organizationId/members'
@@ -341,6 +365,7 @@ export interface RootRouteChildren {
   LoginRoute: typeof LoginRoute
   MagicLinkRoute: typeof MagicLinkRoute
   ApiAuthSplatRoute: typeof ApiAuthSplatRoute
+  ApiGoogleCallbackRoute: typeof ApiGoogleCallbackRoute
   ApiE2eDeleteUserEmailRoute: typeof ApiE2eDeleteUserEmailRoute
   ApiOrgOrganizationIdUploadImageNameRoute: typeof ApiOrgOrganizationIdUploadImageNameRoute
 }
@@ -487,6 +512,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AppOrganizationIdInspectorRouteImport
       parentRoute: typeof AppOrganizationIdRoute
     }
+    '/app/$organizationId/google': {
+      id: '/app/$organizationId/google'
+      path: '/google'
+      fullPath: '/app/$organizationId/google'
+      preLoaderRoute: typeof AppOrganizationIdGoogleRouteImport
+      parentRoute: typeof AppOrganizationIdRoute
+    }
     '/app/$organizationId/chat': {
       id: '/app/$organizationId/chat'
       path: '/chat'
@@ -507,6 +539,13 @@ declare module '@tanstack/react-router' {
       fullPath: '/app/$organizationId/agent'
       preLoaderRoute: typeof AppOrganizationIdAgentRouteImport
       parentRoute: typeof AppOrganizationIdRoute
+    }
+    '/api/google/callback': {
+      id: '/api/google/callback'
+      path: '/api/google/callback'
+      fullPath: '/api/google/callback'
+      preLoaderRoute: typeof ApiGoogleCallbackRouteImport
+      parentRoute: typeof rootRouteImport
     }
     '/api/auth/$': {
       id: '/api/auth/$'
@@ -566,6 +605,7 @@ interface AppOrganizationIdRouteChildren {
   AppOrganizationIdAgentRoute: typeof AppOrganizationIdAgentRoute
   AppOrganizationIdBillingRoute: typeof AppOrganizationIdBillingRoute
   AppOrganizationIdChatRoute: typeof AppOrganizationIdChatRoute
+  AppOrganizationIdGoogleRoute: typeof AppOrganizationIdGoogleRoute
   AppOrganizationIdInspectorRoute: typeof AppOrganizationIdInspectorRoute
   AppOrganizationIdInvitationsRoute: typeof AppOrganizationIdInvitationsRoute
   AppOrganizationIdMembersRoute: typeof AppOrganizationIdMembersRoute
@@ -578,6 +618,7 @@ const AppOrganizationIdRouteChildren: AppOrganizationIdRouteChildren = {
   AppOrganizationIdAgentRoute: AppOrganizationIdAgentRoute,
   AppOrganizationIdBillingRoute: AppOrganizationIdBillingRoute,
   AppOrganizationIdChatRoute: AppOrganizationIdChatRoute,
+  AppOrganizationIdGoogleRoute: AppOrganizationIdGoogleRoute,
   AppOrganizationIdInspectorRoute: AppOrganizationIdInspectorRoute,
   AppOrganizationIdInvitationsRoute: AppOrganizationIdInvitationsRoute,
   AppOrganizationIdMembersRoute: AppOrganizationIdMembersRoute,
@@ -608,6 +649,7 @@ const rootRouteChildren: RootRouteChildren = {
   LoginRoute: LoginRoute,
   MagicLinkRoute: MagicLinkRoute,
   ApiAuthSplatRoute: ApiAuthSplatRoute,
+  ApiGoogleCallbackRoute: ApiGoogleCallbackRoute,
   ApiE2eDeleteUserEmailRoute: ApiE2eDeleteUserEmailRoute,
   ApiOrgOrganizationIdUploadImageNameRoute:
     ApiOrgOrganizationIdUploadImageNameRoute,

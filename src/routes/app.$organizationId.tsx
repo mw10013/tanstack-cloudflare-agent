@@ -194,6 +194,21 @@ function AppSidebar({
               <SidebarMenuItem>
                 <SidebarMenuButton
                   isActive={Boolean(
+                    matchRoute({ to: "/app/$organizationId/google" }),
+                  )}
+                  render={
+                    <Link
+                      to="/app/$organizationId/google"
+                      params={{ organizationId: organization.id }}
+                    >
+                      Google
+                    </Link>
+                  }
+                />
+              </SidebarMenuItem>
+              <SidebarMenuItem>
+                <SidebarMenuButton
+                  isActive={Boolean(
                     matchRoute({ to: "/app/$organizationId/inspector" }),
                   )}
                   render={

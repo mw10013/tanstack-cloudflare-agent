@@ -93,6 +93,29 @@ const UploadRow = z.object({
 });
 export type UploadRow = z.infer<typeof UploadRow>;
 
+const GoogleConnectionRow = z.object({
+  id: z.number(),
+  provider: z.string(),
+  googleUserEmail: z.string().nullable(),
+  scopes: z.string(),
+  accessToken: z.string().nullable(),
+  accessTokenExpiresAt: z.number().nullable(),
+  refreshToken: z.string().nullable(),
+  idToken: z.string().nullable(),
+  createdAt: z.number(),
+  updatedAt: z.number(),
+});
+type GoogleConnectionRow = z.infer<typeof GoogleConnectionRow>;
+
+const GoogleSpreadsheetCacheRow = z.object({
+  spreadsheetId: z.string(),
+  name: z.string(),
+  modifiedTime: z.string().nullable(),
+  webViewLink: z.string().nullable(),
+  lastSeenAt: z.number(),
+});
+type GoogleSpreadsheetCacheRow = z.infer<typeof GoogleSpreadsheetCacheRow>;
+
 const activeWorkflowStatuses = new Set([
   "queued",
   "running",
@@ -244,6 +267,41 @@ export class OrganizationAgent extends AIChatAgent<Env> {
         classificationLabel text,
         classificationScore real,
         classifiedAt integer
+      )`;
+    void this
+      .sql`create table if not exists GoogleConnection (
+        id integer primary key check (id = 1),
+        provider text not null,
+        googleUserEmail text,
+        scopes text not null,
+        accessToken text,
+        accessTokenExpiresAt integer,
+        refreshToken text,
+        idToken text,
+        createdAt integer not null,
+        updatedAt integer not null
+      )`;
+    void this
+      .sql`create table if not exists GoogleOAuthState (
+        state text primary key,
+        codeVerifier text not null,
+        createdAt integer not null,
+        expiresAt integer not null
+      )`;
+    void this
+      .sql`create table if not exists GoogleSheetsConfig (
+        id integer primary key check (id = 1),
+        defaultSpreadsheetId text,
+        defaultSheetName text,
+        updatedAt integer not null
+      )`;
+    void this
+      .sql`create table if not exists GoogleSpreadsheetCache (
+        spreadsheetId text primary key,
+        name text not null,
+        modifiedTime text,
+        webViewLink text,
+        lastSeenAt integer not null
       )`;
   }
 
@@ -431,6 +489,217 @@ export class OrganizationAgent extends AIChatAgent<Env> {
     return UploadRow.array().parse(
       this.sql`select * from Upload order by createdAt desc`,
     );
+  }
+
+  @callable()
+  beginGoogleOAuth(input: {
+    state: string;
+    codeVerifier: string;
+    expiresAt: number;
+  }) {
+    const now = Date.now();
+    void this.sql`insert or replace into GoogleOAuthState (
+      state, codeVerifier, createdAt, expiresAt
+    ) values (
+      ${input.state}, ${input.codeVerifier}, ${now}, ${input.expiresAt}
+    )`;
+    return { ok: true };
+  }
+
+  @callable()
+  consumeGoogleOAuthState(state: string) {
+    const now = Date.now();
+    const rows = this.sql<{
+      state: string;
+      codeVerifier: string;
+      expiresAt: number;
+    }>`select state, codeVerifier, expiresAt from GoogleOAuthState where state = ${state}`;
+    if (rows.length === 0) {
+      return { ok: false as const, reason: "missing" as const };
+    }
+    const row = rows[0];
+    if (row.expiresAt < now) {
+      void this.sql`delete from GoogleOAuthState where state = ${state}`;
+      return { ok: false as const, reason: "expired" as const };
+    }
+    void this.sql`delete from GoogleOAuthState where state = ${state}`;
+    return { ok: true as const, codeVerifier: row.codeVerifier };
+  }
+
+  @callable()
+  saveGoogleTokens(input: {
+    accessToken: string;
+    accessTokenExpiresAt: number;
+    refreshToken?: string;
+    scope: string;
+    idToken?: string;
+  }) {
+    const now = Date.now();
+    const existingRows = this.sql<{ refreshToken: string | null }>`
+      select refreshToken from GoogleConnection where id = 1
+    `;
+    const existingRefreshToken = existingRows.length > 0
+      ? existingRows[0].refreshToken
+      : null;
+    const refreshToken = input.refreshToken ?? existingRefreshToken;
+    void this.sql`insert into GoogleConnection (
+      id, provider, googleUserEmail, scopes, accessToken, accessTokenExpiresAt,
+      refreshToken, idToken, createdAt, updatedAt
+    ) values (
+      1, ${"google"}, null, ${input.scope}, ${input.accessToken},
+      ${input.accessTokenExpiresAt}, ${refreshToken}, ${input.idToken ?? null},
+      ${now}, ${now}
+    )
+    on conflict(id) do update set
+      scopes = excluded.scopes,
+      accessToken = excluded.accessToken,
+      accessTokenExpiresAt = excluded.accessTokenExpiresAt,
+      refreshToken = excluded.refreshToken,
+      idToken = excluded.idToken,
+      updatedAt = excluded.updatedAt`;
+    return { ok: true };
+  }
+
+  @callable()
+  getGoogleConnectionStatus() {
+    const row = GoogleConnectionRow.nullable().parse(this.sql<GoogleConnectionRow>`
+      select * from GoogleConnection where id = 1
+    `[0] ?? null);
+    return {
+      connected: Boolean(row?.refreshToken),
+      scopes: row?.scopes ?? "",
+      accessTokenExpiresAt: row?.accessTokenExpiresAt ?? null,
+    };
+  }
+
+  @callable()
+  disconnectGoogle() {
+    void this.sql`delete from GoogleConnection where id = 1`;
+    void this.sql`delete from GoogleOAuthState`;
+    void this.sql`delete from GoogleSheetsConfig where id = 1`;
+    void this.sql`delete from GoogleSpreadsheetCache`;
+    return { ok: true };
+  }
+
+  @callable()
+  getCachedDriveSpreadsheets() {
+    return GoogleSpreadsheetCacheRow.array().parse(this.sql<GoogleSpreadsheetCacheRow>`
+      select * from GoogleSpreadsheetCache order by name asc
+    `);
+  }
+
+  @callable()
+  setDefaultSpreadsheet(input: { spreadsheetId: string; sheetName?: string }) {
+    const now = Date.now();
+    void this.sql`insert into GoogleSheetsConfig (
+      id, defaultSpreadsheetId, defaultSheetName, updatedAt
+    ) values (
+      1, ${input.spreadsheetId}, ${input.sheetName ?? "Sheet1"}, ${now}
+    ) on conflict(id) do update set
+      defaultSpreadsheetId = excluded.defaultSpreadsheetId,
+      defaultSheetName = excluded.defaultSheetName,
+      updatedAt = excluded.updatedAt`;
+    return { ok: true };
+  }
+
+  @callable()
+  getDefaultSpreadsheet() {
+    const rows = this.sql<{
+      defaultSpreadsheetId: string | null;
+      defaultSheetName: string | null;
+    }>`select defaultSpreadsheetId, defaultSheetName from GoogleSheetsConfig where id = 1`;
+    if (rows.length === 0) {
+      return { defaultSpreadsheetId: null, defaultSheetName: null };
+    }
+    return rows[0];
+  }
+
+  @callable()
+  async listDriveSpreadsheets() {
+    const accessToken = await this.getValidGoogleAccessToken();
+    const url = new URL("https://www.googleapis.com/drive/v3/files");
+    url.searchParams.set(
+      "q",
+      "mimeType='application/vnd.google-apps.spreadsheet' and trashed=false",
+    );
+    url.searchParams.set("fields", "files(id,name,modifiedTime,webViewLink)");
+    url.searchParams.set("pageSize", "100");
+    const res = await fetch(url, {
+      headers: { authorization: `Bearer ${accessToken}` },
+    });
+    if (!res.ok) {
+      throw new Error(`Drive list failed: ${String(res.status)}`);
+    }
+    const data = z.object({
+      files: z.array(z.object({
+        id: z.string(),
+        name: z.string(),
+        modifiedTime: z.string().optional(),
+        webViewLink: z.string().optional(),
+      })).optional(),
+    }).parse(await res.json());
+    const now = Date.now();
+    const files = (data.files ?? []).map((file) => ({
+      spreadsheetId: file.id,
+      name: file.name,
+      modifiedTime: file.modifiedTime ?? null,
+      webViewLink: file.webViewLink ?? null,
+    }));
+    for (const file of files) {
+      void this.sql`insert into GoogleSpreadsheetCache (
+        spreadsheetId, name, modifiedTime, webViewLink, lastSeenAt
+      ) values (
+        ${file.spreadsheetId}, ${file.name}, ${file.modifiedTime},
+        ${file.webViewLink}, ${now}
+      ) on conflict(spreadsheetId) do update set
+        name = excluded.name,
+        modifiedTime = excluded.modifiedTime,
+        webViewLink = excluded.webViewLink,
+        lastSeenAt = excluded.lastSeenAt`;
+    }
+    return files;
+  }
+
+  @callable()
+  async readDefaultRange(range?: string) {
+    const cfg = this.getDefaultSpreadsheet();
+    if (!cfg.defaultSpreadsheetId) {
+      throw new Error("No default spreadsheet selected");
+    }
+    const sheetName = cfg.defaultSheetName ?? "Sheet1";
+    const resolvedRange = range ?? `${sheetName}!A1:C20`;
+    const accessToken = await this.getValidGoogleAccessToken();
+    const endpoint = `https://sheets.googleapis.com/v4/spreadsheets/${cfg.defaultSpreadsheetId}/values/${encodeURIComponent(resolvedRange)}`;
+    const res = await fetch(endpoint, {
+      headers: { authorization: `Bearer ${accessToken}` },
+    });
+    if (!res.ok) {
+      throw new Error(`Sheets read failed: ${String(res.status)}`);
+    }
+    return res.json();
+  }
+
+  @callable()
+  async appendDefaultRow(values: string[]) {
+    const cfg = this.getDefaultSpreadsheet();
+    if (!cfg.defaultSpreadsheetId) {
+      throw new Error("No default spreadsheet selected");
+    }
+    const sheetName = cfg.defaultSheetName ?? "Sheet1";
+    const accessToken = await this.getValidGoogleAccessToken();
+    const endpoint = `https://sheets.googleapis.com/v4/spreadsheets/${cfg.defaultSpreadsheetId}/values/${encodeURIComponent(`${sheetName}!A:Z`)}:append?valueInputOption=USER_ENTERED`;
+    const res = await fetch(endpoint, {
+      method: "POST",
+      headers: {
+        authorization: `Bearer ${accessToken}`,
+        "content-type": "application/json",
+      },
+      body: JSON.stringify({ values: [values] }),
+    });
+    if (!res.ok) {
+      throw new Error(`Sheets append failed: ${String(res.status)}`);
+    }
+    return res.json();
   }
 
   getAgentState() {
@@ -703,5 +972,65 @@ export class OrganizationAgent extends AIChatAgent<Env> {
       prompt: "fee fi",
     });
     return text && text.trim().length > 0 ? text : "No response";
+  }
+
+  private getGoogleConnectionRow() {
+    return GoogleConnectionRow.nullable().parse(this.sql<GoogleConnectionRow>`
+      select * from GoogleConnection where id = 1
+    `[0] ?? null);
+  }
+
+  private async getValidGoogleAccessToken() {
+    const row = this.getGoogleConnectionRow();
+    if (!row?.refreshToken) {
+      throw new Error("Google not connected");
+    }
+    if (
+      row.accessToken &&
+      row.accessTokenExpiresAt &&
+      row.accessTokenExpiresAt > Date.now() + 60_000
+    ) {
+      return row.accessToken;
+    }
+    await this.refreshGoogleAccessToken(row.refreshToken);
+    const refreshed = this.getGoogleConnectionRow();
+    if (!refreshed?.accessToken) {
+      throw new Error("Google token refresh failed");
+    }
+    return refreshed.accessToken;
+  }
+
+  private async refreshGoogleAccessToken(refreshToken: string) {
+    const body = new URLSearchParams();
+    body.set("client_id", this.env.GOOGLE_OAUTH_CLIENT_ID);
+    body.set("client_secret", this.env.GOOGLE_OAUTH_CLIENT_SECRET);
+    body.set("grant_type", "refresh_token");
+    body.set("refresh_token", refreshToken);
+    const response = await fetch("https://oauth2.googleapis.com/token", {
+      method: "POST",
+      headers: { "content-type": "application/x-www-form-urlencoded" },
+      body,
+    });
+    if (!response.ok) {
+      throw new Error(`Google token refresh failed: ${String(response.status)}`);
+    }
+    const tokenJson = z.object({
+      access_token: z.string(),
+      expires_in: z.number(),
+      scope: z.string().optional(),
+      id_token: z.string().optional(),
+    }).parse(await response.json());
+    const current = this.getGoogleConnectionRow();
+    if (!current) {
+      throw new Error("Google connection missing");
+    }
+    const now = Date.now();
+    void this.sql`update GoogleConnection
+      set accessToken = ${tokenJson.access_token},
+          accessTokenExpiresAt = ${now + tokenJson.expires_in * 1000},
+          scopes = ${tokenJson.scope ?? current.scopes},
+          idToken = ${tokenJson.id_token ?? current.idToken},
+          updatedAt = ${now}
+      where id = 1`;
   }
 }
