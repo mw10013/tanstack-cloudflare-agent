@@ -127,6 +127,7 @@ pnpm test:e2e
 - Update wrangler.jsonc production kv_namespaces
 - pnpm exec wrangler queues create r2-upload-notifications
 - pnpm exec wrangler r2 bucket notification create uploads --event-type object-create --queue r2-upload-notifications
+- pnpm exec wrangler r2 bucket notification create uploads --event-type object-delete --queue r2-upload-notifications
 - pnpm d1:reset:PRODUCTION
 - pnpm deploy:PRODUCTION
 - pnpm exec wrangler secret put SECRET --env production

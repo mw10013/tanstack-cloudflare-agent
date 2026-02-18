@@ -61,6 +61,10 @@ const uploadFormSchema = z.object({
     .mime(imageMimeTypes),
 });
 
+const deleteUploadSchema = z.object({
+  name: uploadNameSchema,
+});
+
 const uploadFile = createServerFn({ method: "POST" })
   .inputValidator((data) => {
     if (!(data instanceof FormData)) throw new Error("Expected FormData");
@@ -92,6 +96,26 @@ const uploadFile = createServerFn({ method: "POST" })
       });
     }
     return { success: true, name: data.name, size: data.file.size, idempotencyKey };
+  });
+
+const deleteUpload = createServerFn({ method: "POST" })
+  .inputValidator(deleteUploadSchema)
+  .handler(async ({ context: { session, env }, data }) => {
+    invariant(session, "Missing session");
+    const organizationId = session.session.activeOrganizationId;
+    invariant(organizationId, "Missing active organization");
+    const key = `${organizationId}/${data.name}`;
+    await env.R2.delete(key);
+    if (env.ENVIRONMENT === "local") {
+      await env.R2_UPLOAD_QUEUE.send({
+        account: "local",
+        action: "DeleteObject",
+        bucket: env.R2_BUCKET_NAME,
+        object: { key },
+        eventTime: new Date().toISOString(),
+      });
+    }
+    return { success: true, name: data.name };
   });
 
 const getUploads = createServerFn({ method: "GET" })
@@ -156,8 +180,11 @@ function RouteComponent() {
     onMessage: (event) => {
       const result = organizationMessageSchema.safeParse(JSON.parse(String(event.data)));
       if (!result.success) return;
-      setMessages((prev) => [result.data, ...prev]);
+      if (result.data.type !== "upload_deleted") {
+        setMessages((prev) => [result.data, ...prev]);
+      }
       if (
+        result.data.type === "upload_deleted" ||
         result.data.type === "classification_updated" ||
         result.data.type === "classification_error"
       ) {
@@ -170,6 +197,13 @@ function RouteComponent() {
     mutationFn: (formData: FormData) => uploadServerFn({ data: formData }),
     onSuccess: () => {
       form.reset();
+      void router.invalidate();
+    },
+  });
+  const deleteUploadServerFn = useServerFn(deleteUpload);
+  const deleteMutation = useMutation({
+    mutationFn: ({ name }: { name: string }) => deleteUploadServerFn({ data: { name } }),
+    onSuccess: () => {
       void router.invalidate();
     },
   });
@@ -337,6 +371,18 @@ function RouteComponent() {
                         ? `${upload.classificationLabel} (${String(Math.round((upload.classificationScore ?? 0) * 100))}%)`
                         : "Classifying..."}
                     </p>
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant="destructive"
+                      onClick={() => {
+                        deleteMutation.mutate({ name: upload.name });
+                      }}
+                      disabled={deleteMutation.isPending}
+                      className="mt-2"
+                    >
+                      {deleteMutation.isPending ? "Deleting..." : "Delete"}
+                    </Button>
                   </div>
                 </div>
               ))}
@@ -380,6 +426,8 @@ function MessageIcon({ type }: { type: OrganizationMessage["type"] }) {
   switch (type) {
     case "upload_error":
       return <XCircle className="text-destructive size-4" />;
+    case "upload_deleted":
+      return <Info className="text-blue-600 size-4" />;
     case "workflow_progress":
       return <CircleDot className="text-yellow-600 size-4" />;
     case "workflow_complete":
@@ -401,6 +449,8 @@ function formatMessage(msg: OrganizationMessage): string {
   switch (msg.type) {
     case "upload_error":
       return `${msg.name} failed: ${msg.error}`;
+    case "upload_deleted":
+      return `${msg.name} deleted`;
     case "workflow_progress":
       return msg.progress.message;
     case "workflow_complete":

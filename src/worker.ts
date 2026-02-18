@@ -151,36 +151,80 @@ export default {
         continue;
       }
       const notification = parsed.data;
-      if (notification.action !== "PutObject") {
+      if (
+        notification.action !== "PutObject" &&
+        notification.action !== "DeleteObject" &&
+        notification.action !== "LifecycleDeletion"
+      ) {
         message.ack();
         continue;
       }
-      const head = await env.R2.head(notification.object.key);
-      if (!head) {
-        console.warn(
-          "R2 object deleted before notification processed:",
-          notification.object.key,
-        );
-        message.ack();
+      if (notification.action === "PutObject") {
+        const head = await env.R2.head(notification.object.key);
+        if (!head) {
+          console.warn(
+            "R2 object deleted before notification processed:",
+            notification.object.key,
+          );
+          message.ack();
+          continue;
+        }
+        const organizationId = head.customMetadata?.organizationId;
+        const name = head.customMetadata?.name;
+        const idempotencyKey = head.customMetadata?.idempotencyKey;
+        if (!organizationId || !name || !idempotencyKey) {
+          console.error(
+            "Missing customMetadata on R2 object:",
+            notification.object.key,
+          );
+          message.ack();
+          continue;
+        }
+        const stub = await getAgentByName(env.ORGANIZATION_AGENT, organizationId);
+        try {
+          await stub.onUpload({
+            name,
+            eventTime: notification.eventTime,
+            idempotencyKey,
+            r2ObjectKey: notification.object.key,
+          });
+          message.ack();
+        } catch (error) {
+          const msg = error instanceof Error
+            ? `${error.name}: ${error.message}\n${error.stack ?? ""}`
+            : String(error);
+          console.error("queue onUpload failed", {
+            key: notification.object.key,
+            organizationId,
+            name,
+            idempotencyKey,
+            error: msg,
+          });
+          message.retry();
+        }
         continue;
       }
-      const organizationId = head.customMetadata?.organizationId;
-      const name = head.customMetadata?.name;
-      const idempotencyKey = head.customMetadata?.idempotencyKey;
-      if (!organizationId || !name || !idempotencyKey) {
-        console.error(
-          "Missing customMetadata on R2 object:",
-          notification.object.key,
-        );
+      const slashIndex = notification.object.key.indexOf("/");
+      const organizationId = slashIndex > 0
+        ? notification.object.key.slice(0, slashIndex)
+        : "";
+      const name = slashIndex > 0
+        ? notification.object.key.slice(slashIndex + 1)
+        : "";
+      if (!organizationId || !name) {
+        console.error("Invalid delete object key", {
+          key: notification.object.key,
+          action: notification.action,
+        });
         message.ack();
         continue;
       }
       const stub = await getAgentByName(env.ORGANIZATION_AGENT, organizationId);
       try {
-        await stub.onUpload({
+        await stub.onDelete({
           name,
           eventTime: notification.eventTime,
-          idempotencyKey,
+          action: notification.action,
           r2ObjectKey: notification.object.key,
         });
         message.ack();
@@ -188,11 +232,11 @@ export default {
         const msg = error instanceof Error
           ? `${error.name}: ${error.message}\n${error.stack ?? ""}`
           : String(error);
-        console.error("queue onUpload failed", {
+        console.error("queue onDelete failed", {
           key: notification.object.key,
           organizationId,
           name,
-          idempotencyKey,
+          action: notification.action,
           error: msg,
         });
         message.retry();

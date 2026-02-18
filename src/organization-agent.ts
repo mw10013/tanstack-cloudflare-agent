@@ -355,6 +355,50 @@ export class OrganizationAgent extends AIChatAgent<Env> {
     });
   }
 
+  async onDelete(input: {
+    name: string;
+    eventTime: string;
+    action: "DeleteObject" | "LifecycleDeletion";
+    r2ObjectKey: string;
+  }) {
+    const eventTime = Date.parse(input.eventTime);
+    if (!Number.isFinite(eventTime)) {
+      throw new Error(`Invalid eventTime: ${input.eventTime}`);
+    }
+    const existing = UploadRow.nullable().parse(this
+      .sql<UploadRow>`select * from Upload where name = ${input.name}`[0] ?? null);
+    if (!existing || eventTime < existing.eventTime) {
+      return;
+    }
+    const trackedWorkflow = this.getWorkflow(existing.idempotencyKey);
+    if (trackedWorkflow && activeWorkflowStatuses.has(trackedWorkflow.status)) {
+      try {
+        await this.terminateWorkflow(existing.idempotencyKey);
+      } catch (error) {
+        console.warn("delete workflow termination failed", {
+          name: input.name,
+          idempotencyKey: existing.idempotencyKey,
+          action: input.action,
+          r2ObjectKey: input.r2ObjectKey,
+          error: error instanceof Error ? error.message : String(error),
+        });
+      }
+    }
+    const deleted = this.sql<{ name: string }>`
+      delete from Upload
+      where name = ${input.name} and eventTime <= ${eventTime}
+      returning name
+    `;
+    if (deleted.length === 0) {
+      return;
+    }
+    this.broadcastMessage({
+      type: "upload_deleted",
+      name: input.name,
+      eventTime,
+    });
+  }
+
   applyClassificationResult(input: {
     idempotencyKey: string;
     label: string;
