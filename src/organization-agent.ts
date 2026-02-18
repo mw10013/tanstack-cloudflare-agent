@@ -12,6 +12,12 @@ import { convertToModelMessages, generateText, streamText } from "ai";
 import { createOpenAI } from "ai-gateway-provider/providers/openai";
 import { createWorkersAI } from "workers-ai-provider";
 import * as z from "zod";
+import {
+  appendSpreadsheetValuesRequest,
+  getSpreadsheetValuesRequest,
+  listDriveSpreadsheetsRequest,
+} from "@/lib/google-client";
+import { refreshGoogleToken } from "@/lib/google-oauth-client";
 import { type OrganizationMessage } from "@/organization-messages";
 
 const AgentState = z.object({
@@ -617,27 +623,7 @@ export class OrganizationAgent extends AIChatAgent<Env> {
   @callable()
   async listDriveSpreadsheets() {
     const accessToken = await this.getValidGoogleAccessToken();
-    const url = new URL("https://www.googleapis.com/drive/v3/files");
-    url.searchParams.set(
-      "q",
-      "mimeType='application/vnd.google-apps.spreadsheet' and trashed=false",
-    );
-    url.searchParams.set("fields", "files(id,name,modifiedTime,webViewLink)");
-    url.searchParams.set("pageSize", "100");
-    const res = await fetch(url, {
-      headers: { authorization: `Bearer ${accessToken}` },
-    });
-    if (!res.ok) {
-      throw new Error(`Drive list failed: ${String(res.status)}`);
-    }
-    const data = z.object({
-      files: z.array(z.object({
-        id: z.string(),
-        name: z.string(),
-        modifiedTime: z.string().optional(),
-        webViewLink: z.string().optional(),
-      })).optional(),
-    }).parse(await res.json());
+    const data = await listDriveSpreadsheetsRequest(accessToken);
     const now = Date.now();
     const files = (data.files ?? []).map((file) => ({
       spreadsheetId: file.id,
@@ -669,14 +655,11 @@ export class OrganizationAgent extends AIChatAgent<Env> {
     const sheetName = cfg.defaultSheetName ?? "Sheet1";
     const resolvedRange = range ?? `${sheetName}!A1:C20`;
     const accessToken = await this.getValidGoogleAccessToken();
-    const endpoint = `https://sheets.googleapis.com/v4/spreadsheets/${cfg.defaultSpreadsheetId}/values/${encodeURIComponent(resolvedRange)}`;
-    const res = await fetch(endpoint, {
-      headers: { authorization: `Bearer ${accessToken}` },
-    });
-    if (!res.ok) {
-      throw new Error(`Sheets read failed: ${String(res.status)}`);
-    }
-    return res.json();
+    return getSpreadsheetValuesRequest(
+      accessToken,
+      cfg.defaultSpreadsheetId,
+      resolvedRange,
+    );
   }
 
   @callable()
@@ -687,19 +670,12 @@ export class OrganizationAgent extends AIChatAgent<Env> {
     }
     const sheetName = cfg.defaultSheetName ?? "Sheet1";
     const accessToken = await this.getValidGoogleAccessToken();
-    const endpoint = `https://sheets.googleapis.com/v4/spreadsheets/${cfg.defaultSpreadsheetId}/values/${encodeURIComponent(`${sheetName}!A:Z`)}:append?valueInputOption=USER_ENTERED`;
-    const res = await fetch(endpoint, {
-      method: "POST",
-      headers: {
-        authorization: `Bearer ${accessToken}`,
-        "content-type": "application/json",
-      },
-      body: JSON.stringify({ values: [values] }),
-    });
-    if (!res.ok) {
-      throw new Error(`Sheets append failed: ${String(res.status)}`);
-    }
-    return res.json();
+    return appendSpreadsheetValuesRequest(
+      accessToken,
+      cfg.defaultSpreadsheetId,
+      `${sheetName}!A:Z`,
+      values,
+    );
   }
 
   getAgentState() {
@@ -1001,35 +977,22 @@ export class OrganizationAgent extends AIChatAgent<Env> {
   }
 
   private async refreshGoogleAccessToken(refreshToken: string) {
-    const body = new URLSearchParams();
-    body.set("client_id", this.env.GOOGLE_OAUTH_CLIENT_ID);
-    body.set("client_secret", this.env.GOOGLE_OAUTH_CLIENT_SECRET);
-    body.set("grant_type", "refresh_token");
-    body.set("refresh_token", refreshToken);
-    const response = await fetch("https://oauth2.googleapis.com/token", {
-      method: "POST",
-      headers: { "content-type": "application/x-www-form-urlencoded" },
-      body,
+    const token = await refreshGoogleToken({
+      clientId: this.env.GOOGLE_OAUTH_CLIENT_ID,
+      clientSecret: this.env.GOOGLE_OAUTH_CLIENT_SECRET,
+      redirectUri: this.env.GOOGLE_OAUTH_REDIRECT_URI,
+      refreshToken,
     });
-    if (!response.ok) {
-      throw new Error(`Google token refresh failed: ${String(response.status)}`);
-    }
-    const tokenJson = z.object({
-      access_token: z.string(),
-      expires_in: z.number(),
-      scope: z.string().optional(),
-      id_token: z.string().optional(),
-    }).parse(await response.json());
     const current = this.getGoogleConnectionRow();
     if (!current) {
       throw new Error("Google connection missing");
     }
     const now = Date.now();
     void this.sql`update GoogleConnection
-      set accessToken = ${tokenJson.access_token},
-          accessTokenExpiresAt = ${now + tokenJson.expires_in * 1000},
-          scopes = ${tokenJson.scope ?? current.scopes},
-          idToken = ${tokenJson.id_token ?? current.idToken},
+      set accessToken = ${token.access_token},
+          accessTokenExpiresAt = ${now + token.expires_in * 1000},
+          scopes = ${token.scope ?? current.scopes},
+          idToken = ${token.id_token ?? current.idToken},
           updatedAt = ${now}
       where id = 1`;
   }

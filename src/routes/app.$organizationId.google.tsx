@@ -20,6 +20,7 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
+import { buildGoogleAuthorizationRequest } from "@/lib/google-oauth-client";
 
 const searchSchema = z.object({
   google: z.enum(["connected", "denied", "error"]).optional(),
@@ -51,46 +52,33 @@ const beginGoogleConnect = createServerFn({ method: "POST" })
     invariant(organizationId, "Missing active organization");
     invariant(env.GOOGLE_OAUTH_CLIENT_ID, "Missing GOOGLE_OAUTH_CLIENT_ID");
     invariant(
+      env.GOOGLE_OAUTH_CLIENT_SECRET,
+      "Missing GOOGLE_OAUTH_CLIENT_SECRET",
+    );
+    invariant(
       env.GOOGLE_OAUTH_REDIRECT_URI,
       "Missing GOOGLE_OAUTH_REDIRECT_URI",
     );
     const id = env.ORGANIZATION_AGENT.idFromName(organizationId);
     const stub = env.ORGANIZATION_AGENT.get(id);
 
-    const stateBytes = crypto.getRandomValues(new Uint8Array(32));
-    const verifierBytes = crypto.getRandomValues(new Uint8Array(48));
-    const state = toBase64Url(stateBytes);
-    const codeVerifier = toBase64Url(verifierBytes);
-    const digest = await crypto.subtle.digest(
-      "SHA-256",
-      new TextEncoder().encode(codeVerifier),
-    );
-    const codeChallenge = toBase64Url(new Uint8Array(digest));
-
-    await stub.beginGoogleOAuth({
-      state,
-      codeVerifier,
-      expiresAt: Date.now() + 10 * 60 * 1000,
-    });
-
-    const url = new URL("https://accounts.google.com/o/oauth2/v2/auth");
-    url.searchParams.set("client_id", env.GOOGLE_OAUTH_CLIENT_ID);
-    url.searchParams.set("redirect_uri", env.GOOGLE_OAUTH_REDIRECT_URI);
-    url.searchParams.set("response_type", "code");
-    url.searchParams.set(
-      "scope",
-      [
+    const oauth = await buildGoogleAuthorizationRequest({
+      clientId: env.GOOGLE_OAUTH_CLIENT_ID,
+      clientSecret: env.GOOGLE_OAUTH_CLIENT_SECRET,
+      redirectUri: env.GOOGLE_OAUTH_REDIRECT_URI,
+      scope: [
         "https://www.googleapis.com/auth/drive.readonly",
         "https://www.googleapis.com/auth/spreadsheets",
         "https://www.googleapis.com/auth/documents",
-      ].join(" "),
-    );
-    url.searchParams.set("access_type", "offline");
-    url.searchParams.set("prompt", "consent");
-    url.searchParams.set("state", state);
-    url.searchParams.set("code_challenge", codeChallenge);
-    url.searchParams.set("code_challenge_method", "S256");
-    return { url: url.toString() };
+      ],
+    });
+
+    await stub.beginGoogleOAuth({
+      state: oauth.state,
+      codeVerifier: oauth.codeVerifier,
+      expiresAt: Date.now() + 10 * 60 * 1000,
+    });
+    return { url: oauth.authorizationUrl };
   });
 
 export const Route = createFileRoute("/app/$organizationId/google")({
@@ -374,13 +362,6 @@ function RouteComponent() {
       </Card>
     </div>
   );
-}
-
-function toBase64Url(bytes: Uint8Array) {
-  return btoa(String.fromCharCode(...bytes))
-    .replaceAll("+", "-")
-    .replaceAll("/", "_")
-    .replaceAll("=", "");
 }
 
 function splitValues(input: string) {

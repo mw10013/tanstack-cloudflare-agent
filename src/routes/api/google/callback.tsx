@@ -1,6 +1,6 @@
 import { invariant } from "@epic-web/invariant";
 import { createFileRoute } from "@tanstack/react-router";
-import * as z from "zod";
+import { exchangeGoogleAuthorizationCode } from "@/lib/google-oauth-client";
 
 export const Route = createFileRoute("/api/google/callback")({
   server: {
@@ -51,37 +51,34 @@ export const Route = createFileRoute("/api/google/callback")({
           );
         }
 
-        const body = new URLSearchParams();
-        body.set("code", code);
-        body.set("client_id", context.env.GOOGLE_OAUTH_CLIENT_ID);
-        body.set("client_secret", context.env.GOOGLE_OAUTH_CLIENT_SECRET);
-        body.set("redirect_uri", context.env.GOOGLE_OAUTH_REDIRECT_URI);
-        body.set("grant_type", "authorization_code");
-        body.set("code_verifier", stateResult.codeVerifier);
-        const tokenRes = await fetch("https://oauth2.googleapis.com/token", {
-          method: "POST",
-          headers: { "content-type": "application/x-www-form-urlencoded" },
-          body,
-        });
-        if (!tokenRes.ok) {
+        let token: {
+          access_token: string;
+          expires_in: number;
+          refresh_token?: string;
+          scope?: string;
+          id_token?: string;
+        };
+        try {
+          token = await exchangeGoogleAuthorizationCode({
+            clientId: context.env.GOOGLE_OAUTH_CLIENT_ID,
+            clientSecret: context.env.GOOGLE_OAUTH_CLIENT_SECRET,
+            redirectUri: context.env.GOOGLE_OAUTH_REDIRECT_URI,
+            currentUrl: callbackUrl,
+            codeVerifier: stateResult.codeVerifier,
+            expectedState: state,
+          });
+        } catch {
           return Response.redirect(
             `${context.env.BETTER_AUTH_URL}/app/${organizationId}/google?google=error`,
             302,
           );
         }
-        const tokenJson = z.object({
-          access_token: z.string(),
-          expires_in: z.number(),
-          refresh_token: z.string().optional(),
-          scope: z.string(),
-          id_token: z.string().optional(),
-        }).parse(await tokenRes.json());
         await stub.saveGoogleTokens({
-          accessToken: tokenJson.access_token,
-          accessTokenExpiresAt: Date.now() + tokenJson.expires_in * 1000,
-          refreshToken: tokenJson.refresh_token,
-          scope: tokenJson.scope,
-          idToken: tokenJson.id_token,
+          accessToken: token.access_token,
+          accessTokenExpiresAt: Date.now() + token.expires_in * 1000,
+          refreshToken: token.refresh_token,
+          scope: token.scope ?? "",
+          idToken: token.id_token,
         });
         return Response.redirect(
           `${context.env.BETTER_AUTH_URL}/app/${organizationId}/google?google=connected`,
