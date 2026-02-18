@@ -153,7 +153,14 @@ pnpm dlx shadcn@latest add https://ai-sdk.dev/elements/api/registry/all.json
 ```
 ln -s AGENTS.md CLAUDE.md
 pnpm add -g @playwright/cli@latest
+
+codex -m gpt-5.3-codex -c 'model_reasoning_effort="high"'
+codex -m gpt-5.3-codex -c 'model_reasoning_effort="xhigh"'
+
+npm install -g @openai/codex
 ```
+
+- OpenAI model docs: GPT-5.2-Codex supports low, medium, high, xhigh
 
 ## Credit
 
