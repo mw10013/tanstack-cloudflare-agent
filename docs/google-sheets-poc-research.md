@@ -366,6 +366,92 @@ Current Better Auth schema includes token fields in app DB:
 
 Using organization agent SQLite instead keeps ownership and lifecycle aligned to the organization agent itself.
 
+## Google Account Setup (Beginner Guide)
+
+This section explains how to obtain:
+
+- `GOOGLE_OAUTH_CLIENT_ID`
+- `GOOGLE_OAUTH_CLIENT_SECRET`
+
+without assuming prior Google Cloud knowledge.
+
+### What is Google Cloud Console?
+
+- Google Cloud Console is Google's dashboard for configuring APIs, OAuth, credentials, and billing for apps.
+- URL: `https://console.cloud.google.com/`
+- Sign in with your Google account.
+
+### What you are creating
+
+You need an OAuth client for a web app. Google gives you:
+
+- a **Client ID** -> use as `GOOGLE_OAUTH_CLIENT_ID`
+- a **Client Secret** -> use as `GOOGLE_OAUTH_CLIENT_SECRET`
+
+### Step-by-step clicks
+
+1. Open `https://console.cloud.google.com/`
+2. Create/select a project:
+   - top nav project picker -> **New Project** (if needed)
+3. Enable APIs:
+   - left nav -> **APIs & Services** -> **Library**
+   - enable:
+     - **Google Drive API**
+     - **Google Sheets API**
+     - **Google Docs API**
+4. Configure OAuth consent screen:
+   - **APIs & Services** -> **OAuth consent screen**
+   - user type for POC: **External**
+   - fill required app fields (app name, support email, developer email)
+   - add scopes you need when prompted
+   - add your Google account as a test user if app is in testing mode
+5. Create OAuth client credentials:
+   - **APIs & Services** -> **Credentials**
+   - **Create Credentials** -> **OAuth client ID**
+   - Application type: **Web application**
+   - Name: anything (e.g. `tca-localdev`)
+   - Authorized redirect URIs:
+     - `http://localhost:<PORT>/api/google/callback`
+     - replace `<PORT>` with output of `pnpm port`
+6. Save and copy values:
+   - copy **Client ID**
+   - copy **Client secret**
+
+### Map Google values to your env vars
+
+```env
+GOOGLE_OAUTH_CLIENT_ID=<client-id-from-google>
+GOOGLE_OAUTH_CLIENT_SECRET=<client-secret-from-google>
+GOOGLE_OAUTH_REDIRECT_URI=http://localhost:<PORT>/api/google/callback
+```
+
+### Localdev notes for this repo
+
+- This repo’s local port is from:
+  - `pnpm port`
+- Redirect URI in Google must match exactly:
+  - scheme (`http`)
+  - host (`localhost`)
+  - port (from `pnpm port`)
+  - path (`/api/google/callback`)
+
+Mismatch here is the most common OAuth error.
+
+### Common errors and what they mean
+
+- `redirect_uri_mismatch`
+  - Redirect URI in request does not exactly match what you registered.
+- `access_denied`
+  - User canceled consent or app not properly configured for testing users.
+- `invalid_client`
+  - Wrong client ID/secret pair.
+
+### Production later (not needed for first local POC)
+
+- Add production redirect URI in Google credentials.
+- Move secret values to Wrangler secrets.
+- Publish/verify consent screen as needed for broader user access.
+
 ## Detailed Implementation Plan
 
 ### Implementation Spec (Concrete, File-by-File)
