@@ -368,312 +368,560 @@ Using organization agent SQLite instead keeps ownership and lifecycle aligned to
 
 ## Detailed Implementation Plan
 
-### Phase 0: Confirm constraints and success criteria
-
-Goal:
-
-- Define exactly what "POC done" means before coding.
-
-Decisions to lock:
-
-- One Google connection per organization agent.
-- OAuth requests 3 scopes in one flow:
-  - `https://www.googleapis.com/auth/drive.readonly`
-  - `https://www.googleapis.com/auth/spreadsheets`
-  - `https://www.googleapis.com/auth/documents`
-- First visible milestone is Drive list (spreadsheet files).
-- Second milestone is selecting a spreadsheet and writing/reading a test value.
-
-Acceptance criteria:
-
-- Connected state visible in org page.
-- Spreadsheet list loads for connected org.
-- Spreadsheet can be selected and persisted.
-- Agent can read/write selected spreadsheet.
-- Disconnect clears effective connection.
-
-### Phase 1: Data model in OrganizationAgent SQLite
-
-Goal:
-
-- Persist OAuth state, tokens, and selected spreadsheet in DO SQLite.
-
-Tables:
-
-- `GoogleConnection`
-- `GoogleOAuthState`
-- `GoogleSheetsConfig`
-- `GoogleSpreadsheetCache`
-
-Implementation notes:
-
-- Initialize tables in `OrganizationAgent` constructor with `create table if not exists`.
-- Keep single-row semantics where applicable via `id = 1`.
-- Store timestamps as epoch millis integers.
-- Store `scopes` as space-delimited string exactly as granted.
-- Keep refresh token nullable-safe to handle reauth responses that omit refresh token.
-
-Validation checks:
-
-- Attempt duplicate connect should update single row, not create duplicates.
-- State table entries expire and are cleaned up.
-
-### Phase 2: OAuth initiation endpoint (TanStack route layer)
-
-Goal:
-
-- Start OAuth flow from web app, tied to active organization.
-
-Responsibilities:
-
-- Resolve authenticated session and active organization.
-- Generate cryptographically strong `state` (and PKCE verifier).
-- Persist state record in target organization agent (`GoogleOAuthState`).
-- Redirect to Google authorization URL with required scopes.
-
-Key parameters to include in auth URL:
-
-- `client_id`
-- `redirect_uri`
-- `response_type=code`
-- `scope` (3 scopes space-delimited)
-- `state`
-- `access_type=offline`
-- `prompt=consent` (POC-friendly to reliably get refresh token)
-- PKCE fields if enabled:
-  - `code_challenge`
-  - `code_challenge_method=S256`
-
-Error handling:
-
-- Missing active org -> 403.
-- Agent unavailable -> 503 retryable UX message.
-- Failed state persist -> 500 with structured error response.
-
-### Phase 3: OAuth callback endpoint (TanStack route layer)
-
-Goal:
-
-- Complete OAuth and persist tokens through the organization agent.
-
-Responsibilities:
-
-- Parse `code`, `state`, and `error` query params.
-- If provider returns `error`, surface user-safe message.
-- Resolve active organization from session.
-- Validate `state` by round-tripping to organization agent storage.
-- Exchange `code` at Google token endpoint.
-- Persist token payload via organization agent RPC/stub.
-- Mark state consumed and remove it.
-- Redirect back to org integration page with success/failure indicator.
-
-Token exchange expectations:
-
-- Store:
-  - `access_token`
-  - `expires_in` -> compute `accessTokenExpiresAt`
-  - `refresh_token` (if present; preserve existing if absent)
-  - `scope`
-  - optional `id_token`
-
-Security checks:
-
-- Reject callback when state missing/expired/mismatched.
-- Do not log tokens.
-- Preserve CSRF guarantees via state validation.
-
-### Phase 4: Agent-side Google integration service
-
-Goal:
-
-- Centralize Google token lifecycle + API calls inside organization agent.
-
-Capabilities:
-
-- `getGoogleConnection()`
-- `upsertGoogleConnection(tokenPayload)`
-- `disconnectGoogle()`
-- `getValidAccessToken()`:
-  - If current access token is valid, return it.
-  - Else refresh using `refresh_token`.
-  - Persist rotated access token/expiry.
-
-Refresh strategy:
-
-- Treat token as expired with small skew window (for example 60s).
-- If refresh fails with invalid grant, clear connection and force reconnect.
-- Handle concurrent refresh safely (single-threaded DO helps, still keep logic idempotent).
-
-### Phase 5: Drive list files milestone
-
-Goal:
-
-- Display spreadsheet files from connected Google account.
-
-Agent method:
-
-- `listDriveSpreadsheets()`
-
-Drive API call:
-
-- `files.list` with query filtering spreadsheet mime type.
-- Return minimal fields needed for UI:
-  - `id`
-  - `name`
-  - optionally `modifiedTime`
-
-Persistence:
-
-- Upsert into `GoogleSpreadsheetCache`.
-- Include `lastSeenAt`.
-
-UI behavior:
-
-- Org page shows:
-  - connect button when disconnected
-  - refresh list button when connected
-  - list loading/error/empty states
-
-### Phase 6: Spreadsheet selection and persistence
-
-Goal:
-
-- Let user pick one spreadsheet for org agent default operations.
-
-Agent methods:
-
-- `setDefaultSpreadsheet({ spreadsheetId, sheetName? })`
-- `getDefaultSpreadsheet()`
-
-Validation:
-
-- Ensure selected `spreadsheetId` exists in latest cache or verify via API on save.
-- Store selected id in `GoogleSheetsConfig`.
-
-UI behavior:
-
-- Highlight current default spreadsheet.
-- Persist selection immediately.
-
-### Phase 7: Sheets read/write milestone
-
-Goal:
-
-- Prove agent can operate on selected spreadsheet.
-
-Agent methods:
-
-- `writeTestRow({ values })` using `spreadsheets.values.append` or `update`.
-- `readTestRange({ range })` using `spreadsheets.values.get`.
-
-POC default choices:
-
-- Default tab: `"Sheet1"` unless user specifies otherwise.
-- Default range for smoke test: `"Sheet1!A1:C10"`.
-
-Success signals:
-
-- Write returns updated range/row count.
-- Read returns values including recent write.
-
-### Phase 8: Route + UI integration page
-
-Goal:
-
-- Single org page to manage Google connection and spreadsheet selection.
-
-Page sections:
-
-- Connection status:
-  - disconnected / connecting / connected / token-refresh-error
-- Actions:
-  - connect
-  - disconnect
-  - refresh file list
-  - select spreadsheet
-  - run read/write smoke test
-- Result panels:
-  - latest Drive list
-  - selected spreadsheet
-  - last operation result/error
-
-Transport usage:
-
-- OAuth start/callback over HTTP routes.
-- Runtime ops via agent RPC (`useAgent`) is fine and aligns with your architecture.
-
-### Phase 9: Error handling and UX hardening
-
-Goal:
-
-- Make failure modes understandable in POC.
-
-Cases to handle:
-
-- User denies consent.
-- Missing refresh token after callback.
-- Expired/revoked token.
-- Drive API quota or permission errors.
-- Selected spreadsheet deleted or access removed.
-
-UX rules:
-
-- Show clear next action on every error.
-- Never expose raw token data.
-- Keep retry buttons near failing action.
-
-### Phase 10: Security and operational guardrails
-
-Goal:
-
-- Keep POC safe without over-engineering.
-
-Minimum controls:
-
-- Google client secret in Worker secrets.
-- No token logging.
-- State expiration enforcement.
-- Disconnect endpoint clears connection rows.
-
-Optional next-step controls:
-
-- App-layer encryption for `refreshToken` using env key.
-- Scope reduction after validating required capabilities.
-- Add lightweight audit table for connect/disconnect and file operations.
-
-### Phase 11: Testing plan
-
-Manual tests:
-
-1. Connect flow success path.
-2. Consent denied path.
-3. Callback with invalid state.
-4. Drive list after connect.
-5. Select spreadsheet and reload page persistence.
-6. Read/write smoke test success.
-7. Disconnect then verify operations fail with reconnect prompt.
-8. Multi-user same org sees same connection state and spreadsheet selection.
-9. Different org isolation check.
-
-Automated tests to add later:
-
-- Unit tests for token-expiry and refresh decision logic.
-- Integration tests for state validation and callback handling.
-- Agent method tests for persistence and selection behavior.
-
-### Phase 12: Incremental rollout order
-
-Recommended order:
-
-1. Tables + agent persistence methods.
-2. OAuth start + callback skeleton.
-3. Token exchange and save.
-4. Drive list endpoint + UI list.
-5. Spreadsheet selection save/load.
-6. Sheets read/write smoke test.
-7. Disconnect flow.
-8. Error/empty-state polish.
-
-Definition of done for this plan:
-
-- A user on org integration page can connect Google, see spreadsheet list, select one spreadsheet, and run a successful read/write operation through the organization agent.
+### Implementation Spec (Concrete, File-by-File)
+
+This section is the direct execution spec for an LLM implementer.
+
+### 1) Add env bindings and secrets
+
+Target:
+
+- `wrangler.jsonc`
+- `.env.example`
+- `src/worker.ts` types already come from generated `worker-configuration.d.ts`
+
+Required env vars:
+
+- `GOOGLE_OAUTH_CLIENT_ID`
+- `GOOGLE_OAUTH_CLIENT_SECRET`
+- `GOOGLE_OAUTH_REDIRECT_URI`
+
+Example `.env.example` block:
+
+```env
+GOOGLE_OAUTH_CLIENT_ID=
+GOOGLE_OAUTH_CLIENT_SECRET=
+GOOGLE_OAUTH_REDIRECT_URI=http://localhost:3000/api/google/callback
+```
+
+Add real values via Wrangler secrets for deployed envs.
+
+### 2) Extend `OrganizationAgent` storage schema
+
+Target:
+
+- `src/organization-agent.ts`
+
+Pattern to follow:
+
+- Existing `this.sql` table init in constructor at `src/organization-agent.ts:239`
+- Existing callable methods at `src/organization-agent.ts:585`
+
+Add tables in constructor:
+
+```ts
+void this.sql`create table if not exists GoogleConnection (
+  id integer primary key check (id = 1),
+  provider text not null,
+  googleUserEmail text,
+  scopes text not null,
+  accessToken text,
+  accessTokenExpiresAt integer,
+  refreshToken text,
+  idToken text,
+  createdAt integer not null,
+  updatedAt integer not null
+)`;
+void this.sql`create table if not exists GoogleOAuthState (
+  state text primary key,
+  codeVerifier text not null,
+  createdAt integer not null,
+  expiresAt integer not null
+)`;
+void this.sql`create table if not exists GoogleSheetsConfig (
+  id integer primary key check (id = 1),
+  defaultSpreadsheetId text,
+  defaultSheetName text,
+  updatedAt integer not null
+)`;
+void this.sql`create table if not exists GoogleSpreadsheetCache (
+  spreadsheetId text primary key,
+  name text not null,
+  modifiedTime text,
+  webViewLink text,
+  lastSeenAt integer not null
+)`;
+```
+
+### 3) Add concrete callable methods in `OrganizationAgent`
+
+Target:
+
+- `src/organization-agent.ts`
+
+Add callable method signatures:
+
+```ts
+@callable()
+beginGoogleOAuth(input: {
+  state: string;
+  codeVerifier: string;
+  expiresAt: number;
+}) {
+  const now = Date.now();
+  void this.sql`insert or replace into GoogleOAuthState (
+    state, codeVerifier, createdAt, expiresAt
+  ) values (
+    ${input.state}, ${input.codeVerifier}, ${now}, ${input.expiresAt}
+  )`;
+  return { ok: true };
+}
+
+@callable()
+consumeGoogleOAuthState(state: string) {
+  const now = Date.now();
+  const row = this.sql<{
+    state: string;
+    codeVerifier: string;
+    expiresAt: number;
+  }>`select state, codeVerifier, expiresAt from GoogleOAuthState where state = ${state}`[0] ?? null;
+  if (!row) return { ok: false as const, reason: "missing" as const };
+  if (row.expiresAt < now) {
+    void this.sql`delete from GoogleOAuthState where state = ${state}`;
+    return { ok: false as const, reason: "expired" as const };
+  }
+  void this.sql`delete from GoogleOAuthState where state = ${state}`;
+  return { ok: true as const, codeVerifier: row.codeVerifier };
+}
+
+@callable()
+saveGoogleTokens(input: {
+  accessToken: string;
+  accessTokenExpiresAt: number;
+  refreshToken?: string;
+  scope: string;
+  idToken?: string;
+}) {
+  const now = Date.now();
+  const existing = this.sql<{ refreshToken: string | null }>`
+    select refreshToken from GoogleConnection where id = 1
+  `[0] ?? null;
+  const refreshToken = input.refreshToken ?? existing?.refreshToken ?? null;
+  void this.sql`insert into GoogleConnection (
+    id, provider, googleUserEmail, scopes, accessToken, accessTokenExpiresAt,
+    refreshToken, idToken, createdAt, updatedAt
+  ) values (
+    1, ${"google"}, null, ${input.scope}, ${input.accessToken},
+    ${input.accessTokenExpiresAt}, ${refreshToken}, ${input.idToken ?? null},
+    ${now}, ${now}
+  )
+  on conflict(id) do update set
+    scopes = excluded.scopes,
+    accessToken = excluded.accessToken,
+    accessTokenExpiresAt = excluded.accessTokenExpiresAt,
+    refreshToken = excluded.refreshToken,
+    idToken = excluded.idToken,
+    updatedAt = excluded.updatedAt`;
+  return { ok: true };
+}
+
+@callable()
+getGoogleConnectionStatus() {
+  const row = this.sql<{
+    scopes: string;
+    accessTokenExpiresAt: number | null;
+    refreshToken: string | null;
+  }>`select scopes, accessTokenExpiresAt, refreshToken from GoogleConnection where id = 1`[0] ?? null;
+  return {
+    connected: Boolean(row?.refreshToken),
+    scopes: row?.scopes ?? "",
+    accessTokenExpiresAt: row?.accessTokenExpiresAt ?? null,
+  };
+}
+
+@callable()
+disconnectGoogle() {
+  void this.sql`delete from GoogleConnection where id = 1`;
+  void this.sql`delete from GoogleOAuthState`;
+  void this.sql`delete from GoogleSheetsConfig where id = 1`;
+  void this.sql`delete from GoogleSpreadsheetCache`;
+  return { ok: true };
+}
+```
+
+Add non-callable helpers for Google API:
+
+- `private async getValidGoogleAccessToken(): Promise<string>`
+- `private async refreshGoogleAccessToken(refreshToken: string): Promise<void>`
+
+Implementation detail for expiration:
+
+- consider expired when `accessTokenExpiresAt <= Date.now() + 60_000`
+
+### 4) Add OAuth start server function (TanStack Start pattern)
+
+Target:
+
+- new route file: `src/routes/app.$organizationId.google.tsx`
+
+Pattern to follow:
+
+- `createServerFn` style from `src/routes/app.$organizationId.upload.tsx:65`
+
+Concrete start function:
+
+```ts
+const beginGoogleConnect = createServerFn({ method: "POST" })
+  .handler(async ({ context: { session, env } }) => {
+    invariant(session, "Missing session");
+    const organizationId = session.session.activeOrganizationId;
+    invariant(organizationId, "Missing active organization");
+    const id = env.ORGANIZATION_AGENT.idFromName(organizationId);
+    const stub = env.ORGANIZATION_AGENT.get(id);
+
+    const bytes = crypto.getRandomValues(new Uint8Array(32));
+    const state = btoa(String.fromCharCode(...bytes)).replaceAll("+", "-").replaceAll("/", "_").replaceAll("=", "");
+    const verifierBytes = crypto.getRandomValues(new Uint8Array(48));
+    const codeVerifier = btoa(String.fromCharCode(...verifierBytes)).replaceAll("+", "-").replaceAll("/", "_").replaceAll("=", "");
+    const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(codeVerifier));
+    const codeChallenge = btoa(String.fromCharCode(...new Uint8Array(digest))).replaceAll("+", "-").replaceAll("/", "_").replaceAll("=", "");
+
+    await stub.beginGoogleOAuth({
+      state,
+      codeVerifier,
+      expiresAt: Date.now() + 10 * 60 * 1000,
+    });
+
+    const url = new URL("https://accounts.google.com/o/oauth2/v2/auth");
+    url.searchParams.set("client_id", env.GOOGLE_OAUTH_CLIENT_ID);
+    url.searchParams.set("redirect_uri", env.GOOGLE_OAUTH_REDIRECT_URI);
+    url.searchParams.set("response_type", "code");
+    url.searchParams.set("scope", [
+      "https://www.googleapis.com/auth/drive.readonly",
+      "https://www.googleapis.com/auth/spreadsheets",
+      "https://www.googleapis.com/auth/documents",
+    ].join(" "));
+    url.searchParams.set("access_type", "offline");
+    url.searchParams.set("prompt", "consent");
+    url.searchParams.set("state", state);
+    url.searchParams.set("code_challenge", codeChallenge);
+    url.searchParams.set("code_challenge_method", "S256");
+    return { url: url.toString() };
+  });
+```
+
+Client usage on page:
+
+```ts
+const beginGoogleConnectServerFn = useServerFn(beginGoogleConnect);
+const connectMutation = useMutation({
+  mutationFn: () => beginGoogleConnectServerFn(),
+  onSuccess: ({ url }) => {
+    window.location.href = url;
+  },
+});
+```
+
+### 5) Add OAuth callback route
+
+Target:
+
+- new file `src/routes/api/google/callback.tsx`
+
+Pattern to follow:
+
+- server handler style in `src/routes/api/auth/$.tsx:16`
+
+Concrete callback handler:
+
+```ts
+import { invariant } from "@epic-web/invariant";
+import { createFileRoute } from "@tanstack/react-router";
+import { redirect } from "@tanstack/react-router";
+
+export const Route = createFileRoute("/api/google/callback")({
+  server: {
+    handlers: {
+      GET: async ({ request, context }) => {
+        const session = await context.authService.api.getSession({
+          headers: request.headers,
+        });
+        invariant(session, "Missing session");
+        const organizationId = session.session.activeOrganizationId;
+        invariant(organizationId, "Missing active organization");
+
+        const url = new URL(request.url);
+        const code = url.searchParams.get("code");
+        const state = url.searchParams.get("state");
+        const providerError = url.searchParams.get("error");
+        if (providerError) {
+          throw redirect({ to: `/app/${organizationId}/google?google=denied` });
+        }
+        invariant(code, "Missing code");
+        invariant(state, "Missing state");
+
+        const id = context.env.ORGANIZATION_AGENT.idFromName(organizationId);
+        const stub = context.env.ORGANIZATION_AGENT.get(id);
+        const stateResult = await stub.consumeGoogleOAuthState(state);
+        invariant(stateResult.ok, "Invalid OAuth state");
+
+        const body = new URLSearchParams();
+        body.set("code", code);
+        body.set("client_id", context.env.GOOGLE_OAUTH_CLIENT_ID);
+        body.set("client_secret", context.env.GOOGLE_OAUTH_CLIENT_SECRET);
+        body.set("redirect_uri", context.env.GOOGLE_OAUTH_REDIRECT_URI);
+        body.set("grant_type", "authorization_code");
+        body.set("code_verifier", stateResult.codeVerifier);
+        const tokenRes = await fetch("https://oauth2.googleapis.com/token", {
+          method: "POST",
+          headers: { "content-type": "application/x-www-form-urlencoded" },
+          body,
+        });
+        invariant(tokenRes.ok, `Token exchange failed: ${tokenRes.status}`);
+        const tokenJson = await tokenRes.json() as {
+          access_token: string;
+          expires_in: number;
+          refresh_token?: string;
+          scope: string;
+          id_token?: string;
+        };
+
+        await stub.saveGoogleTokens({
+          accessToken: tokenJson.access_token,
+          accessTokenExpiresAt: Date.now() + tokenJson.expires_in * 1000,
+          refreshToken: tokenJson.refresh_token,
+          scope: tokenJson.scope,
+          idToken: tokenJson.id_token,
+        });
+
+        throw redirect({ to: `/app/${organizationId}/google?google=connected` });
+      },
+    },
+  },
+});
+```
+
+### 6) Add Drive listing callable + cache
+
+Target:
+
+- `src/organization-agent.ts`
+
+Concrete method:
+
+```ts
+@callable()
+async listDriveSpreadsheets(): Promise<Array<{
+  spreadsheetId: string;
+  name: string;
+  modifiedTime: string | null;
+  webViewLink: string | null;
+}>> {
+  const accessToken = await this.getValidGoogleAccessToken();
+  const url = new URL("https://www.googleapis.com/drive/v3/files");
+  url.searchParams.set("q", "mimeType='application/vnd.google-apps.spreadsheet' and trashed=false");
+  url.searchParams.set("fields", "files(id,name,modifiedTime,webViewLink)");
+  url.searchParams.set("pageSize", "100");
+  const res = await fetch(url, {
+    headers: { authorization: `Bearer ${accessToken}` },
+  });
+  if (!res.ok) throw new Error(`Drive list failed: ${res.status}`);
+  const data = await res.json() as {
+    files?: Array<{
+      id: string;
+      name: string;
+      modifiedTime?: string;
+      webViewLink?: string;
+    }>;
+  };
+  const now = Date.now();
+  const files = (data.files ?? []).map((f) => ({
+    spreadsheetId: f.id,
+    name: f.name,
+    modifiedTime: f.modifiedTime ?? null,
+    webViewLink: f.webViewLink ?? null,
+  }));
+  for (const f of files) {
+    void this.sql`insert into GoogleSpreadsheetCache (
+      spreadsheetId, name, modifiedTime, webViewLink, lastSeenAt
+    ) values (
+      ${f.spreadsheetId}, ${f.name}, ${f.modifiedTime}, ${f.webViewLink}, ${now}
+    ) on conflict(spreadsheetId) do update set
+      name = excluded.name,
+      modifiedTime = excluded.modifiedTime,
+      webViewLink = excluded.webViewLink,
+      lastSeenAt = excluded.lastSeenAt`;
+  }
+  return files;
+}
+```
+
+### 7) Add spreadsheet selection + read/write callable methods
+
+Target:
+
+- `src/organization-agent.ts`
+
+Concrete methods:
+
+```ts
+@callable()
+setDefaultSpreadsheet(input: { spreadsheetId: string; sheetName?: string }) {
+  const now = Date.now();
+  void this.sql`insert into GoogleSheetsConfig (
+    id, defaultSpreadsheetId, defaultSheetName, updatedAt
+  ) values (
+    1, ${input.spreadsheetId}, ${input.sheetName ?? "Sheet1"}, ${now}
+  ) on conflict(id) do update set
+    defaultSpreadsheetId = excluded.defaultSpreadsheetId,
+    defaultSheetName = excluded.defaultSheetName,
+    updatedAt = excluded.updatedAt`;
+  return { ok: true };
+}
+
+@callable()
+getDefaultSpreadsheet() {
+  const row = this.sql<{
+    defaultSpreadsheetId: string | null;
+    defaultSheetName: string | null;
+  }>`select defaultSpreadsheetId, defaultSheetName from GoogleSheetsConfig where id = 1`[0] ?? null;
+  return row ?? { defaultSpreadsheetId: null, defaultSheetName: null };
+}
+
+@callable()
+async readDefaultRange(range?: string) {
+  const cfg = this.getDefaultSpreadsheet();
+  if (!cfg.defaultSpreadsheetId) throw new Error("No default spreadsheet selected");
+  const sheet = cfg.defaultSheetName ?? "Sheet1";
+  const resolvedRange = range ?? `${sheet}!A1:C20`;
+  const token = await this.getValidGoogleAccessToken();
+  const url = `https://sheets.googleapis.com/v4/spreadsheets/${cfg.defaultSpreadsheetId}/values/${encodeURIComponent(resolvedRange)}`;
+  const res = await fetch(url, { headers: { authorization: `Bearer ${token}` } });
+  if (!res.ok) throw new Error(`Sheets read failed: ${res.status}`);
+  return res.json();
+}
+
+@callable()
+async appendDefaultRow(values: string[]) {
+  const cfg = this.getDefaultSpreadsheet();
+  if (!cfg.defaultSpreadsheetId) throw new Error("No default spreadsheet selected");
+  const sheet = cfg.defaultSheetName ?? "Sheet1";
+  const token = await this.getValidGoogleAccessToken();
+  const url = `https://sheets.googleapis.com/v4/spreadsheets/${cfg.defaultSpreadsheetId}/values/${encodeURIComponent(`${sheet}!A:Z`)}:append?valueInputOption=USER_ENTERED`;
+  const res = await fetch(url, {
+    method: "POST",
+    headers: {
+      authorization: `Bearer ${token}`,
+      "content-type": "application/json",
+    },
+    body: JSON.stringify({ values: [values] }),
+  });
+  if (!res.ok) throw new Error(`Sheets append failed: ${res.status}`);
+  return res.json();
+}
+```
+
+### 8) Add new org page `/app/$organizationId/google`
+
+Target:
+
+- new route file `src/routes/app.$organizationId.google.tsx`
+
+Pattern to follow:
+
+- `useAgent` usage from `src/routes/app.$organizationId.agent.tsx:25`
+- mutation pattern from `src/routes/app.$organizationId.workflow.tsx:89`
+
+Core client wiring:
+
+```tsx
+const { organizationId } = Route.useParams();
+const agent = useAgent<OrganizationAgent, unknown>({
+  agent: "organization-agent",
+  name: organizationId,
+});
+
+const statusMutation = useMutation({
+  mutationFn: () => agent.stub.getGoogleConnectionStatus(),
+});
+const listMutation = useMutation({
+  mutationFn: () => agent.stub.listDriveSpreadsheets(),
+});
+const selectMutation = useMutation({
+  mutationFn: (spreadsheetId: string) =>
+    agent.stub.setDefaultSpreadsheet({ spreadsheetId, sheetName: "Sheet1" }),
+});
+const appendMutation = useMutation({
+  mutationFn: () => agent.stub.appendDefaultRow([new Date().toISOString(), "poc", "ok"]),
+});
+const readMutation = useMutation({
+  mutationFn: () => agent.stub.readDefaultRange(),
+});
+const disconnectMutation = useMutation({
+  mutationFn: () => agent.stub.disconnectGoogle(),
+});
+```
+
+### 9) Add route navigation
+
+Targets:
+
+- route list/sidebar location where org routes are surfaced, likely:
+  - `src/routes/app.$organizationId.tsx`
+  - any sidebar component used by app routes
+
+Add a link to `/app/$organizationId/google`.
+
+### 10) Concrete failure handling contract
+
+Agent error codes to normalize:
+
+- `"google_not_connected"`
+- `"google_state_invalid"`
+- `"google_refresh_failed"`
+- `"google_sheet_not_selected"`
+
+Server/callback redirect query flags:
+
+- `?google=connected`
+- `?google=denied`
+- `?google=error`
+
+UI mapping:
+
+- `connected` => success banner
+- `denied` => warning banner with reconnect CTA
+- `error` => destructive banner + retry CTA
+
+### 11) Verification commands and expected outputs
+
+Type/lint:
+
+```bash
+pnpm typecheck
+pnpm lint
+```
+
+Expected:
+
+- both commands exit `0`
+
+Manual POC verification:
+
+1. Open `/app/<orgId>/google`
+2. Click Connect
+3. Complete consent
+4. Return to page with `google=connected`
+5. Click Refresh list
+6. Select one spreadsheet
+7. Click Append test row
+8. Click Read range
+9. Confirm new row visible in UI and actual sheet
+10. Disconnect and verify list/read/write now fail with reconnect prompt
+
+### 12) Strict rollout order
+
+1. Env vars + config.
+2. Agent SQL tables.
+3. Agent callable methods for OAuth state + token save/status/disconnect.
+4. OAuth start server fn on new Google org page.
+5. OAuth callback route.
+6. Token refresh helper.
+7. Drive list callable + UI button.
+8. Spreadsheet select callable + UI.
+9. Sheets append/read callables + UI.
+10. Final typecheck/lint/manual flow.
+
+Definition of done:
+
+- A non-owner org member can connect Google for the org, list spreadsheets, pick one, append a row, read rows, and disconnect; behavior is shared across users in the same organization agent.
