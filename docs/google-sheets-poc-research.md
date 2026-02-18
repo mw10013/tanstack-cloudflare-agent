@@ -59,8 +59,6 @@ Because OAuth scopes should match first capability. POC is easier if we define o
 
 Then scope/API/storage can be minimal.
 
-I don't want to create a new spreadsheet every time the user authenticates. Maybe there's some way to show what spreadsheets are in the account?
-
 ### Why might `spreadsheetId` be required?
 
 Most Sheets API calls target a specific spreadsheet, so they need `spreadsheetId`.
@@ -68,11 +66,20 @@ Most Sheets API calls target a specific spreadsheet, so they need `spreadsheetId
 POC options:
 
 - User pastes `spreadsheetId` once
+- or user picks from a list of existing spreadsheets
 - or agent creates a spreadsheet first, then persists returned `spreadsheetId`
 
-Simple path: create one spreadsheet at connect time and store that id as org default.
+If you want users to pick existing spreadsheets, add a listing step.
 
-Again, I think I would like the user to be able to pick an existing spreadsheet from a list.
+Important detail: listing spreadsheets is generally a **Drive API** concern (`files.list` with spreadsheet mime type), not a Sheets API endpoint. So this introduces Drive scope/API even if write actions remain Sheets.
+
+References:
+
+- https://developers.google.com/workspace/drive/api/guides/search-files
+- https://developers.google.com/workspace/drive/api/guides/mime-types
+- https://developers.google.com/workspace/sheets/api/scopes
+
+Hmmm, it makes sense that drive seems to be primary focus. Perhaps we should focus on drive first for the poc. is there a way scopes or some such in the oauth flow for drive, sheets, and docs in one go? I still don't understand oath to know even what scopes are or the oauth flow.
 
 ## Grounding in current codebase
 
@@ -95,7 +102,34 @@ Agents SDK OAuth provider also persists OAuth client/tokens/state in Durable Obj
 
 That matches your preference to avoid Better Auth `Account` table.
 
-What is Agents SDK OAuth? I think we need a deep dive here since agents may provided very helpful functionality out of the box, hopefully.
+### Agents SDK OAuth deep dive (what it is, what it is not)
+
+What it is:
+
+- OAuth plumbing used by the Agents SDK MCP client manager
+- Persists OAuth state/client/tokens in DO storage
+- Handles callback orchestration through Agent request handling
+
+Grounding:
+
+- `refs/agents/packages/agents/src/index.ts:686` initializes `MCPClientManager`
+- `refs/agents/packages/agents/src/index.ts:753` handles MCP OAuth callback path
+- `refs/agents/packages/agents/src/mcp/do-oauth-client-provider.ts:36` class `DurableObjectOAuthClientProvider`
+- `refs/agents/packages/agents/src/mcp/do-oauth-client-provider.ts:149` generates/stores `state`
+- `refs/agents/packages/agents/src/mcp/do-oauth-client-provider.ts:137` persists tokens
+
+What it is not:
+
+- Not an out-of-box generic Google OAuth integration for arbitrary app features.
+- It is specialized around MCP server OAuth flows.
+
+POC guidance:
+
+- Reuse the same design patterns (state table, token persistence, callback validation).
+
+Are you saying we should use the same tables as the agent implementation for MCP? Is that wise? It seems like we really can't use Agents SDK OAuth or am i misunderstanding. need more context and guidance here. 
+
+- Implement Google OAuth explicitly for your organization-agent integration.
 
 ## Durable Object hibernation and token persistence
 
@@ -141,8 +175,8 @@ Reference:
 - One row of Google connection metadata per organization agent
 - First user to connect establishes org-wide Google account link
 - Other users in same org use that same linked account through agent
-
-There are currently several web pages related to organization agent. We'll probably add another one for this poc. If the user navigates to that page, then he should have the opportunity to connect. and when connected or already connected, perhaps that page can show a list of spreadsheets.
+- Add an org page dedicated to Google connection status + spreadsheet selection.
+- If connected, show spreadsheet list and current selected default spreadsheet.
 
 ### Suggested tables in OrganizationAgent SQLite
 
@@ -172,6 +206,12 @@ create table if not exists GoogleSheetsConfig (
   defaultSheetName text,
   updatedAt integer not null
 );
+
+create table if not exists GoogleSpreadsheetCache (
+  spreadsheetId text primary key,
+  name text not null,
+  lastSeenAt integer not null
+);
 ```
 
 Notes:
@@ -181,22 +221,80 @@ Notes:
 
 ## Minimal OAuth + Sheets API flow for POC
 
-1. UI invokes `connectGoogleSheets` action on organization agent route
+1. UI invokes `connectGoogleSheets` action on an org page
 2. Server generates OAuth `state` (and PKCE verifier if used), stores in `GoogleOAuthState`
-3. Redirect user to Google auth URL with scopes:
-   - `https://www.googleapis.com/auth/spreadsheets`
+3. Redirect user to Google auth URL with scopes
 4. Google callback endpoint validates state, exchanges code for tokens
 5. Persist tokens in `GoogleConnection`, clear used state row
-6. If no default spreadsheet configured:
-   - create spreadsheet via Sheets API
-   - persist returned `spreadsheetId` in `GoogleSheetsConfig`
-7. Agent tool calls use stored refresh token -> get access token -> call Sheets API
+6. Fetch spreadsheet list (Drive files.list filtered to spreadsheet mime type) and cache in `GoogleSpreadsheetCache`
+7. User picks spreadsheet from list, persist chosen id in `GoogleSheetsConfig`
+8. Agent tool calls use stored refresh token -> get access token -> call Sheets API on selected spreadsheet
+
+Recommended scopes for this specific UX:
+
+- Fastest implementation: `spreadsheets` + `drive.readonly`
+- Lower-risk alternative: `spreadsheets` + Google Picker + `drive.file` (more moving parts, less broad Drive access)
+
+fastest implementation is too restrictive. we'll want to be able to write and save.
 
 References:
 
 - https://developers.google.com/identity/protocols/oauth2/web-server
 - https://developers.google.com/workspace/sheets/api/scopes
-- https://developers.google.com/workspace/sheets/api/reference/rest/v4/spreadsheets/create
+- https://developers.google.com/workspace/drive/api/guides/search-files
+- https://developers.google.com/workspace/drive/api/guides/api-specific-auth
+
+## Worker vs Agent responsibility split
+
+Your mental model is correct. Recommended split:
+
+1. Worker/TanStack route layer:
+- Serves pages
+- Initiates OAuth redirect
+- Receives OAuth callback HTTP request
+- Resolves `organizationId` from session/route context
+- Forwards connect/disconnect/select actions to the target organization agent
+
+2. Organization Agent:
+- Owns Google tokens and config in DO SQLite
+- Owns spreadsheet list cache
+- Owns all runtime Sheets calls used by tools/RPC/chat workflows
+
+Grounding in current app:
+
+- Worker already routes agent requests and authorizes by active organization id:
+  - `src/worker.ts:69`
+  - `src/worker.ts:78`
+  - `src/worker.ts:89`
+- Worker already calls organization agent by name for background flows:
+  - `src/worker.ts:180`
+
+Important clarification:
+
+- Browser `useAgent()` WebSocket RPC is useful for interactive UI operations.
+- OAuth callback itself should still be plain HTTP route handling.
+- Route handler can call the organization agent stub; callback logic does not need to run over browser WebSocket.
+
+## Answers to open items
+
+1. Callback routing shape:
+
+- Use TanStack API route for callback.
+- Route has session context; from that derive `activeOrganizationId`, then call target agent by name.
+
+2. PKCE for first pass:
+
+- Recommendation: **include PKCE now**.
+- Cost is small, benefit is better authorization-code interception protection.
+
+3. Spreadsheet source:
+
+- Since you want list selection, add Drive listing step and persist selected spreadsheet id.
+
+4. Token encryption at app layer:
+
+- POC acceptable without extra app-layer encryption if you keep strong access controls and use Worker secrets for client secret.
+- Next increment: encrypt `refreshToken` using an env key before DB write.
 
 ## Why this POC shape is low-risk
 
@@ -204,24 +302,6 @@ References:
 - Natural fit with Agent/DO lifecycle and persistence model
 - One clear success criterion: from chat/tool call, write/read a sheet row
 - Easy rollback: disconnect = delete row(s) from `GoogleConnection` and `GoogleSheetsConfig`
-
-## Open items for next iteration
-
-1. Callback routing shape in this app (TanStack route vs Worker endpoint) and exact URL per env
-
-I think this could be tanstack api route. however, it may get tricky to figure out the organizationId which is needed to get the agent by name.
-
-2. Whether to include PKCE in first pass
-
-What do you advise?
-
-3. Whether to auto-create spreadsheet or require user-provided id
-
-I think I'd like it to list the spreadsheets.
-
-4. Whether to encrypt refresh token at application layer for POC v1
-
-This is where I don't have good sense of the architure with a worker function handling all the tanstack routes and the individual agent/durable objects which run independently. The agent is not able to server web pages, so the worker function would be the point of contact for the client browser. however, once a web page is servered, we can use useAgent() to rpc over web socket to the agent. I think we'll need to use this rpc mechanism to drive the spreadsheet in the organization agent. does that make sense? I don't think the worker fn has direct contact with the google spreadsheet. The agent does.
 
 ## Appendix: why not Better Auth `Account`
 
