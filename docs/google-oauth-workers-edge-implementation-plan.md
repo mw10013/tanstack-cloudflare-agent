@@ -141,7 +141,10 @@ export const refreshGoogleToken = async (
   input: GoogleOAuthClientInput & { refreshToken: string },
 ) => {
   const config = await getConfig(input);
-  const tokenResponse = await Oidc.refreshTokenGrant(config, input.refreshToken);
+  const tokenResponse = await Oidc.refreshTokenGrant(
+    config,
+    input.refreshToken,
+  );
   return GoogleTokenResponse.parse(tokenResponse);
 };
 ```
@@ -159,14 +162,20 @@ Snippet:
 ```ts
 import { buildGoogleAuthorizationRequest } from "@/lib/google-oauth-client";
 
-const beginGoogleConnect = createServerFn({ method: "POST" })
-  .handler(async ({ context: { session, env } }) => {
+const beginGoogleConnect = createServerFn({ method: "POST" }).handler(
+  async ({ context: { session, env } }) => {
     invariant(session, "Missing session");
     const organizationId = session.session.activeOrganizationId;
     invariant(organizationId, "Missing active organization");
     invariant(env.GOOGLE_OAUTH_CLIENT_ID, "Missing GOOGLE_OAUTH_CLIENT_ID");
-    invariant(env.GOOGLE_OAUTH_CLIENT_SECRET, "Missing GOOGLE_OAUTH_CLIENT_SECRET");
-    invariant(env.GOOGLE_OAUTH_REDIRECT_URI, "Missing GOOGLE_OAUTH_REDIRECT_URI");
+    invariant(
+      env.GOOGLE_OAUTH_CLIENT_SECRET,
+      "Missing GOOGLE_OAUTH_CLIENT_SECRET",
+    );
+    invariant(
+      env.GOOGLE_OAUTH_REDIRECT_URI,
+      "Missing GOOGLE_OAUTH_REDIRECT_URI",
+    );
 
     const id = env.ORGANIZATION_AGENT.idFromName(organizationId);
     const stub = env.ORGANIZATION_AGENT.get(id);
@@ -189,7 +198,8 @@ const beginGoogleConnect = createServerFn({ method: "POST" })
     });
 
     return { url: oauth.authorizationUrl };
-  });
+  },
+);
 ```
 
 ## Phase 4: Migrate Callback Exchange
@@ -283,12 +293,16 @@ const GoogleApiError = z.object({
 });
 
 const DriveListResponse = z.object({
-  files: z.array(z.object({
-    id: z.string(),
-    name: z.string(),
-    modifiedTime: z.string().optional(),
-    webViewLink: z.string().optional(),
-  })).optional(),
+  files: z
+    .array(
+      z.object({
+        id: z.string(),
+        name: z.string(),
+        modifiedTime: z.string().optional(),
+        webViewLink: z.string().optional(),
+      }),
+    )
+    .optional(),
 });
 
 const SheetsValuesResponse = z.object({
@@ -300,12 +314,14 @@ const SheetsValuesResponse = z.object({
 const SheetsAppendResponse = z.object({
   spreadsheetId: z.string().optional(),
   tableRange: z.string().optional(),
-  updates: z.object({
-    updatedRange: z.string().optional(),
-    updatedRows: z.number().optional(),
-    updatedColumns: z.number().optional(),
-    updatedCells: z.number().optional(),
-  }).optional(),
+  updates: z
+    .object({
+      updatedRange: z.string().optional(),
+      updatedRows: z.number().optional(),
+      updatedColumns: z.number().optional(),
+      updatedCells: z.number().optional(),
+    })
+    .optional(),
 });
 
 interface GoogleRequestInput<T> {
@@ -446,9 +462,3 @@ Manual validation:
    1. Preserve existing scope fallback (`token.scope ?? current.scopes`).
 4. Runtime mismatch
    1. Validate on local Workers runtime with existing route flow before production deploy.
-
-## Rollout Strategy
-
-1. Land phases 1-5 first as one PR focused on OAuth/token lifecycle only.
-2. Land phases 6-7 as second PR for typed API wrappers.
-3. Keep ability to rollback to raw `fetch` by reverting `src/lib/google-oauth-client.ts` integration points only.
