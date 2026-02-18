@@ -79,6 +79,51 @@ Practical read:
 - `googleapis` on Workers = possible in some paths with `nodejs_compat`, not a documented/safe default.
 - Raw `fetch` or edge-native OAuth/JWT libs remains the reliable baseline.
 
+## Google Discovery docs (what they are, how to use them)
+
+What they are:
+
+- Google Discovery documents are machine-readable API descriptions for Google REST APIs.
+- They define resources, methods, HTTP paths, parameters, request/response schemas, and OAuth scopes.
+- They are the source of truth for checking API surface details when writing raw `fetch` clients.
+
+Key URLs:
+
+- Discovery API directory: `https://discovery.googleapis.com/discovery/v1/apis`
+- Discovery usage guide: `https://developers.google.com/discovery/v1/using`
+- Build client libraries from Discovery: `https://docs.cloud.google.com/docs/discovery/build-client-library`
+- Drive v3 Discovery doc: `https://www.googleapis.com/discovery/v1/apis/drive/v3/rest`
+- Sheets v4 Discovery doc: `https://sheets.googleapis.com/$discovery/rest?version=v4`
+
+How a human can use Discovery to validate code:
+
+1. Confirm HTTP method + path for each call (`GET/POST`, endpoint path).
+2. Confirm required query/path/body fields and which are optional.
+3. Confirm OAuth scope requirements per method.
+4. Confirm response shape before deciding type definitions and Zod parsers.
+5. Re-check when Google API versions/method fields change.
+
+How an LLM can use Discovery effectively:
+
+1. Provide the exact Discovery JSON URL(s) in prompt context.
+2. Limit generation scope to specific methods:
+   - `drive.files.list`
+   - `sheets.spreadsheets.values.get`
+   - `sheets.spreadsheets.values.append`
+3. Ask for one contained module with:
+   - typed request/response models
+   - thin `fetch` wrappers
+   - shared auth/error handling
+4. Require output to preserve raw REST semantics (no invented abstractions).
+
+Validation checklist for LLM-generated code:
+
+1. Compare generated params against Discovery method definitions.
+2. Verify endpoint URLs and query param names match Discovery.
+3. Verify required scopes match method docs.
+4. Run `pnpm typecheck` and `pnpm lint`.
+5. Execute real calls in dev against the configured Google project.
+
 ## Cloudflare Agents OAuth in `refs/agents` (what it is)
 
 Your hunch is correct: the built-in OAuth references are MCP-centric.
@@ -300,7 +345,7 @@ Cons:
 Viability:
 
 - Medium for one-off conversion, low for long-term core dependency.
-  Decision:
+Decision:
 
 - Rejected for this project.
 
@@ -318,7 +363,7 @@ Cons:
 Viability:
 
 - Low as a long-term dependency in a production path.
-  Decision:
+Decision:
 
 - Rejected for this project.
 
@@ -337,7 +382,7 @@ Cons:
 Viability:
 
 - High if OpenAPI input quality is controlled.
-  Decision:
+Decision:
 
 - Consider in mid-term if we standardize on high-quality OpenAPI input.
 
@@ -356,7 +401,7 @@ Cons:
 Viability:
 
 - High for this project scope.
-  Decision:
+Decision:
 
 - Defer for now.
 - Revisit when Google API surface grows enough to justify maintenance cost.
@@ -461,5 +506,3 @@ Incremental migration:
 - MCP OAuth docs in refs: `refs/agents/docs/securing-mcp-servers.md:3`
 - MCP OAuth wiring in refs: `refs/agents/packages/agents/src/index.ts:686`
 - MCP OAuth provider type in refs: `refs/agents/packages/agents/src/mcp/do-oauth-client-provider.ts:20`
-
-We need a section on discovery. Should not be at the bottom though. Need details on what it is. How a human can use it to check work and code. How llm can use it. relevant url's.
