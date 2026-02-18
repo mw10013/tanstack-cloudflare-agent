@@ -425,6 +425,26 @@ GOOGLE_OAUTH_CLIENT_SECRET=<client-secret-from-google>
 GOOGLE_OAUTH_REDIRECT_URI=http://localhost:<PORT>/api/google/callback
 ```
 
+Current local client id (provided):
+
+```env
+GOOGLE_OAUTH_CLIENT_ID=776636651275-h65o0s1frskhhdkg6coac8rhmce33qqi.apps.googleusercontent.com
+```
+
+### Exact values to enter in Google OAuth client config
+
+Authorized JavaScript origins:
+
+- `http://localhost:3000`
+- `http://localhost:3001`
+
+Authorized redirect URIs:
+
+- `http://localhost:3000/api/google/callback`
+- `http://localhost:3001/api/google/callback`
+
+If you keep using the repo default port from `pnpm port`, make sure that port is also listed in both places.
+
 ### Localdev notes for this repo
 
 - This repo’s local port is from:
@@ -445,6 +465,8 @@ Mismatch here is the most common OAuth error.
   - User canceled consent or app not properly configured for testing users.
 - `invalid_client`
   - Wrong client ID/secret pair.
+- `origin_mismatch`
+  - Current app origin/port not added under Authorized JavaScript origins.
 
 ### Production later (not needed for first local POC)
 
