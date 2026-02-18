@@ -155,6 +155,10 @@ How it helps here:
 - Higher-level OAuth/OIDC client wrapper than `oauth4webapi`.
 - Tradeoff: more abstraction/magic; less minimal than `oauth4webapi`.
 
+Need more details on oauth4webapi vs openid-client. Seems that they are maintained by the same person who also happens to maintain jose so any of these should be fine from a maintenance perspective.
+
+In general, I would prefer higher-level if the abstractions are good and simplify the implementation/integration. Does openid-client make both oauth4webapi and jose unecessary or do you still need jose? Does openid-client simplify, reduce code relative to oauth4webapi?
+
 ### `@cloudflare/workers-oauth-provider`
 
 Why relevant:
@@ -219,6 +223,8 @@ Why Discovery docs matter:
 
 - Google explicitly documents Discovery as the machine-readable API description to build client libraries.
 - This gives a path to typed generation without adopting Node-only runtime dependencies.
+
+More research needed on discovery for how an llm can use it to generate google api code and types. Also, how to generate types from it directly or with tools and not use llm.
 
 ## Suggested next implementation spike
 
