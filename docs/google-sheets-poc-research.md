@@ -365,3 +365,315 @@ Current Better Auth schema includes token fields in app DB:
 - `migrations/0001_init.sql:125` `refreshToken`
 
 Using organization agent SQLite instead keeps ownership and lifecycle aligned to the organization agent itself.
+
+## Detailed Implementation Plan
+
+### Phase 0: Confirm constraints and success criteria
+
+Goal:
+
+- Define exactly what "POC done" means before coding.
+
+Decisions to lock:
+
+- One Google connection per organization agent.
+- OAuth requests 3 scopes in one flow:
+  - `https://www.googleapis.com/auth/drive.readonly`
+  - `https://www.googleapis.com/auth/spreadsheets`
+  - `https://www.googleapis.com/auth/documents`
+- First visible milestone is Drive list (spreadsheet files).
+- Second milestone is selecting a spreadsheet and writing/reading a test value.
+
+Acceptance criteria:
+
+- Connected state visible in org page.
+- Spreadsheet list loads for connected org.
+- Spreadsheet can be selected and persisted.
+- Agent can read/write selected spreadsheet.
+- Disconnect clears effective connection.
+
+### Phase 1: Data model in OrganizationAgent SQLite
+
+Goal:
+
+- Persist OAuth state, tokens, and selected spreadsheet in DO SQLite.
+
+Tables:
+
+- `GoogleConnection`
+- `GoogleOAuthState`
+- `GoogleSheetsConfig`
+- `GoogleSpreadsheetCache`
+
+Implementation notes:
+
+- Initialize tables in `OrganizationAgent` constructor with `create table if not exists`.
+- Keep single-row semantics where applicable via `id = 1`.
+- Store timestamps as epoch millis integers.
+- Store `scopes` as space-delimited string exactly as granted.
+- Keep refresh token nullable-safe to handle reauth responses that omit refresh token.
+
+Validation checks:
+
+- Attempt duplicate connect should update single row, not create duplicates.
+- State table entries expire and are cleaned up.
+
+### Phase 2: OAuth initiation endpoint (TanStack route layer)
+
+Goal:
+
+- Start OAuth flow from web app, tied to active organization.
+
+Responsibilities:
+
+- Resolve authenticated session and active organization.
+- Generate cryptographically strong `state` (and PKCE verifier).
+- Persist state record in target organization agent (`GoogleOAuthState`).
+- Redirect to Google authorization URL with required scopes.
+
+Key parameters to include in auth URL:
+
+- `client_id`
+- `redirect_uri`
+- `response_type=code`
+- `scope` (3 scopes space-delimited)
+- `state`
+- `access_type=offline`
+- `prompt=consent` (POC-friendly to reliably get refresh token)
+- PKCE fields if enabled:
+  - `code_challenge`
+  - `code_challenge_method=S256`
+
+Error handling:
+
+- Missing active org -> 403.
+- Agent unavailable -> 503 retryable UX message.
+- Failed state persist -> 500 with structured error response.
+
+### Phase 3: OAuth callback endpoint (TanStack route layer)
+
+Goal:
+
+- Complete OAuth and persist tokens through the organization agent.
+
+Responsibilities:
+
+- Parse `code`, `state`, and `error` query params.
+- If provider returns `error`, surface user-safe message.
+- Resolve active organization from session.
+- Validate `state` by round-tripping to organization agent storage.
+- Exchange `code` at Google token endpoint.
+- Persist token payload via organization agent RPC/stub.
+- Mark state consumed and remove it.
+- Redirect back to org integration page with success/failure indicator.
+
+Token exchange expectations:
+
+- Store:
+  - `access_token`
+  - `expires_in` -> compute `accessTokenExpiresAt`
+  - `refresh_token` (if present; preserve existing if absent)
+  - `scope`
+  - optional `id_token`
+
+Security checks:
+
+- Reject callback when state missing/expired/mismatched.
+- Do not log tokens.
+- Preserve CSRF guarantees via state validation.
+
+### Phase 4: Agent-side Google integration service
+
+Goal:
+
+- Centralize Google token lifecycle + API calls inside organization agent.
+
+Capabilities:
+
+- `getGoogleConnection()`
+- `upsertGoogleConnection(tokenPayload)`
+- `disconnectGoogle()`
+- `getValidAccessToken()`:
+  - If current access token is valid, return it.
+  - Else refresh using `refresh_token`.
+  - Persist rotated access token/expiry.
+
+Refresh strategy:
+
+- Treat token as expired with small skew window (for example 60s).
+- If refresh fails with invalid grant, clear connection and force reconnect.
+- Handle concurrent refresh safely (single-threaded DO helps, still keep logic idempotent).
+
+### Phase 5: Drive list files milestone
+
+Goal:
+
+- Display spreadsheet files from connected Google account.
+
+Agent method:
+
+- `listDriveSpreadsheets()`
+
+Drive API call:
+
+- `files.list` with query filtering spreadsheet mime type.
+- Return minimal fields needed for UI:
+  - `id`
+  - `name`
+  - optionally `modifiedTime`
+
+Persistence:
+
+- Upsert into `GoogleSpreadsheetCache`.
+- Include `lastSeenAt`.
+
+UI behavior:
+
+- Org page shows:
+  - connect button when disconnected
+  - refresh list button when connected
+  - list loading/error/empty states
+
+### Phase 6: Spreadsheet selection and persistence
+
+Goal:
+
+- Let user pick one spreadsheet for org agent default operations.
+
+Agent methods:
+
+- `setDefaultSpreadsheet({ spreadsheetId, sheetName? })`
+- `getDefaultSpreadsheet()`
+
+Validation:
+
+- Ensure selected `spreadsheetId` exists in latest cache or verify via API on save.
+- Store selected id in `GoogleSheetsConfig`.
+
+UI behavior:
+
+- Highlight current default spreadsheet.
+- Persist selection immediately.
+
+### Phase 7: Sheets read/write milestone
+
+Goal:
+
+- Prove agent can operate on selected spreadsheet.
+
+Agent methods:
+
+- `writeTestRow({ values })` using `spreadsheets.values.append` or `update`.
+- `readTestRange({ range })` using `spreadsheets.values.get`.
+
+POC default choices:
+
+- Default tab: `"Sheet1"` unless user specifies otherwise.
+- Default range for smoke test: `"Sheet1!A1:C10"`.
+
+Success signals:
+
+- Write returns updated range/row count.
+- Read returns values including recent write.
+
+### Phase 8: Route + UI integration page
+
+Goal:
+
+- Single org page to manage Google connection and spreadsheet selection.
+
+Page sections:
+
+- Connection status:
+  - disconnected / connecting / connected / token-refresh-error
+- Actions:
+  - connect
+  - disconnect
+  - refresh file list
+  - select spreadsheet
+  - run read/write smoke test
+- Result panels:
+  - latest Drive list
+  - selected spreadsheet
+  - last operation result/error
+
+Transport usage:
+
+- OAuth start/callback over HTTP routes.
+- Runtime ops via agent RPC (`useAgent`) is fine and aligns with your architecture.
+
+### Phase 9: Error handling and UX hardening
+
+Goal:
+
+- Make failure modes understandable in POC.
+
+Cases to handle:
+
+- User denies consent.
+- Missing refresh token after callback.
+- Expired/revoked token.
+- Drive API quota or permission errors.
+- Selected spreadsheet deleted or access removed.
+
+UX rules:
+
+- Show clear next action on every error.
+- Never expose raw token data.
+- Keep retry buttons near failing action.
+
+### Phase 10: Security and operational guardrails
+
+Goal:
+
+- Keep POC safe without over-engineering.
+
+Minimum controls:
+
+- Google client secret in Worker secrets.
+- No token logging.
+- State expiration enforcement.
+- Disconnect endpoint clears connection rows.
+
+Optional next-step controls:
+
+- App-layer encryption for `refreshToken` using env key.
+- Scope reduction after validating required capabilities.
+- Add lightweight audit table for connect/disconnect and file operations.
+
+### Phase 11: Testing plan
+
+Manual tests:
+
+1. Connect flow success path.
+2. Consent denied path.
+3. Callback with invalid state.
+4. Drive list after connect.
+5. Select spreadsheet and reload page persistence.
+6. Read/write smoke test success.
+7. Disconnect then verify operations fail with reconnect prompt.
+8. Multi-user same org sees same connection state and spreadsheet selection.
+9. Different org isolation check.
+
+Automated tests to add later:
+
+- Unit tests for token-expiry and refresh decision logic.
+- Integration tests for state validation and callback handling.
+- Agent method tests for persistence and selection behavior.
+
+### Phase 12: Incremental rollout order
+
+Recommended order:
+
+1. Tables + agent persistence methods.
+2. OAuth start + callback skeleton.
+3. Token exchange and save.
+4. Drive list endpoint + UI list.
+5. Spreadsheet selection save/load.
+6. Sheets read/write smoke test.
+7. Disconnect flow.
+8. Error/empty-state polish.
+
+Definition of done for this plan:
+
+- A user on org integration page can connect Google, see spreadsheet list, select one spreadsheet, and run a successful read/write operation through the organization agent.
