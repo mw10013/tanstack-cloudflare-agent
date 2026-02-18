@@ -65,13 +65,19 @@ If later you want Docs too, add:
 
 - `https://www.googleapis.com/auth/documents`
 
+POC decision based on your preference:
+
+- Request all three in the first OAuth flow:
+  - `spreadsheets`
+  - `drive.readonly`
+  - `documents`
+- This is one consent screen, one token set.
+
 References:
 
 - https://developers.google.com/workspace/sheets/api/scopes
 - https://developers.google.com/workspace/drive/api/guides/api-specific-auth
 - https://developers.google.com/workspace/docs/api/auth
-
-If it's simple to have all 3 scopes in the oauth flow, then we should do that.
 
 ## Clarifying your questions
 
@@ -83,7 +89,10 @@ Because OAuth scopes should match first capability. POC is easier if we define o
 
 Then scope/API/storage can be minimal and easier to debug.
 
-We want to simply list the files in google drive first.
+POC decision:
+
+- First milestone is **list files in Drive** (filtered to spreadsheets) on the org integration page.
+- Then milestone 2 is selecting one spreadsheet and reading/writing values.
 
 ### Why might `spreadsheetId` be required?
 
@@ -109,7 +118,7 @@ Can we request Drive + Sheets + Docs in one go?
 
 - Yes. One OAuth redirect can request multiple scopes together.
 - Google returns tokens whose permissions are the union of granted scopes.
-- For POC, prefer fewer scopes first, then add more later if needed.
+- Your chosen POC path: request all three now.
 
 ## Grounding in current codebase
 
@@ -256,17 +265,20 @@ Notes:
 
 1. UI invokes `connectGoogleSheets` action on an org page
 2. Server generates OAuth `state` (and PKCE verifier if used), stores in `GoogleOAuthState`
-3. Redirect user to Google auth URL with scopes
+3. Redirect user to Google auth URL with scopes:
+   - `https://www.googleapis.com/auth/drive.readonly`
+   - `https://www.googleapis.com/auth/spreadsheets`
+   - `https://www.googleapis.com/auth/documents`
 4. Google callback endpoint validates state, exchanges code for tokens
 5. Persist tokens in `GoogleConnection`, clear used state row
-6. Fetch spreadsheet list (Drive files.list filtered to spreadsheet mime type) and cache in `GoogleSpreadsheetCache`
+6. First visible POC outcome: fetch Drive file list (start with spreadsheets) and cache in `GoogleSpreadsheetCache`
 7. User picks spreadsheet from list, persist chosen id in `GoogleSheetsConfig`
 8. Agent tool calls use stored refresh token -> get access token -> call Sheets API on selected spreadsheet
 
 Recommended scopes for this specific UX:
 
-- Fastest implementation: `spreadsheets` + `drive.readonly`
-- Lower-risk alternative: `spreadsheets` + Google Picker + `drive.file` (more moving parts, less broad Drive access)
+- Chosen path: `drive.readonly` + `spreadsheets` + `documents`
+- Lower-risk alternative for later hardening: Google Picker + `drive.file` (more moving parts, less broad Drive access)
 
 Clarification:
 
