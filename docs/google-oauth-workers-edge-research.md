@@ -300,7 +300,7 @@ Cons:
 Viability:
 
 - Medium for one-off conversion, low for long-term core dependency.
-Decision:
+  Decision:
 
 - Rejected for this project.
 
@@ -318,7 +318,7 @@ Cons:
 Viability:
 
 - Low as a long-term dependency in a production path.
-Decision:
+  Decision:
 
 - Rejected for this project.
 
@@ -337,7 +337,7 @@ Cons:
 Viability:
 
 - High if OpenAPI input quality is controlled.
-Decision:
+  Decision:
 
 - Consider in mid-term if we standardize on high-quality OpenAPI input.
 
@@ -356,29 +356,26 @@ Cons:
 Viability:
 
 - High for this project scope.
-Decision:
+  Decision:
 
-- Adopt for this project.
-- Bootstrap is allowed to be LLM-assisted.
-- Ongoing generation must be deterministic via project scripts.
-
-Hold on. I'm a little sloppy and muddy in my thinking. I don't think in these early stages I want a script that needs to be run manually or as build step that uses discovery to generate code. I don't want a manual build/code gen step for now. Maybe in the future.
-
-I think for starting, an llm can use discovery and generate the types and api calls. Hopefully this can be contained in one file.
+- Defer for now.
+- Revisit when Google API surface grows enough to justify maintenance cost.
+- For current phase, prefer a one-time LLM-assisted generation of typed wrappers in one contained module.
 
 ## Do we actually want codegen in this project now?
 
 Recommendation:
 
 - Short-term: no heavy external codegen pipeline.
-- Short-term: add a small internal generator for current Google endpoints after OAuth migration lands.
+- Short-term: no internal generator scripts/manual generation step.
+- Short-term: generate typed wrappers once with LLM using pinned Discovery docs as source input.
 - Medium-term: evaluate OpenAPI-native generators only if API surface expands.
 
 Rationale:
 
 - Current Google surface in codebase is small (a few endpoints), so manual typed wrappers + Zod are still cheap.
 - Most complexity currently sits in OAuth/token lifecycle, not endpoint count.
-- Internal generator gives low-overhead consistency without taking stale converter dependencies.
+- Avoiding codegen scripts reduces process overhead during early iteration.
 
 ## LLM-generated code viability
 
@@ -388,14 +385,21 @@ Short answer:
 
 Use LLM safely if you choose it:
 
-1. Treat discovery docs as hard input and generate deterministic artifacts from pinned versions.
-2. Validate generated code with strict TypeScript + lint + runtime Zod parsing.
-3. Snapshot generated outputs and review diffs like generated code, not handwritten code.
-4. Keep a non-LLM fallback script path for reproducibility in CI.
+1. Treat discovery docs as hard input and pin exact versions/URLs in the doc.
+2. Generate a single contained module for current endpoints (types + request helpers).
+3. Validate generated code with strict TypeScript + lint + runtime Zod parsing.
+4. Review generated code as normal handwritten code and edit directly as needed.
 
 Recommendation:
 
-- Use LLM only to accelerate initial internal-generator implementation, then run deterministic script-based generation going forward.
+- Use LLM for initial generation only; then maintain the file directly until scale justifies formal codegen.
+
+Suggested file shape for this phase:
+
+- `src/lib/google-client.ts` containing:
+  - typed request/response models for `drive.files.list`, `sheets.values.get`, `sheets.values.append`
+  - thin `fetch` functions for those endpoints
+  - shared error normalization and auth header helper
 
 ## Suggested next implementation spike
 
@@ -408,9 +412,9 @@ Recommendation:
    - Drive `files.list`
    - Sheets `spreadsheets.values.get`
    - Sheets `spreadsheets.values.append`
-5. Add internal minimal generator for those endpoints and check generated artifacts into repo.
+5. Keep wrappers in one contained module (no generator scripts/build hooks for now).
 6. Keep current storage tables and migration model.
-7. Defer external discovery->openapi toolchain until endpoint count justifies it.
+7. Defer internal/external codegen toolchains until endpoint count justifies it.
 
 ## Concrete mapping from current code to library adoption
 
@@ -457,3 +461,5 @@ Incremental migration:
 - MCP OAuth docs in refs: `refs/agents/docs/securing-mcp-servers.md:3`
 - MCP OAuth wiring in refs: `refs/agents/packages/agents/src/index.ts:686`
 - MCP OAuth provider type in refs: `refs/agents/packages/agents/src/mcp/do-oauth-client-provider.ts:20`
+
+We need a section on discovery. Should not be at the bottom though. Need details on what it is. How a human can use it to check work and code. How llm can use it. relevant url's.
