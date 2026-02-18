@@ -144,20 +144,47 @@ Useful API building blocks:
 - `SignJWT` for service-account JWT assertions
 - `importPKCS8` / key import helpers for secret-managed private keys
 
-### `openid-client` (optional alternative)
+### `openid-client`
 
 Why relevant:
 
-- Current docs state support for edge runtimes including Cloudflare Workers.
+- Package description: "OAuth 2 / OpenID Connect Client API for JavaScript Runtimes."
+- Runtime support list includes "Cloudflare Workers".
+- Package simplifies OAuth/OIDC integration with higher-level APIs.
 
 How it helps here:
 
 - Higher-level OAuth/OIDC client wrapper than `oauth4webapi`.
 - Tradeoff: more abstraction/magic; less minimal than `oauth4webapi`.
 
-Need more details on oauth4webapi vs openid-client. Seems that they are maintained by the same person who also happens to maintain jose so any of these should be fine from a maintenance perspective.
+Direct answers to annotation questions:
 
-In general, I would prefer higher-level if the abstractions are good and simplify the implementation/integration. Does openid-client make both oauth4webapi and jose unecessary or do you still need jose? Does openid-client simplify, reduce code relative to oauth4webapi?
+- Maintainer overlap: yes, same maintainer ecosystem (`openid-client`, `oauth4webapi`, `jose`).
+- `openid-client` package currently depends on both `oauth4webapi` and `jose` (`openid-client` `package.json`).
+- If you adopt `openid-client` for user OAuth/OIDC flows, you usually do not need to use `oauth4webapi` directly.
+- If you adopt `openid-client`, you usually do not need direct `jose` for normal auth-code + refresh flow.
+- You still need direct `jose` when you need JWT features outside `openid-client` scope.
+
+Inference from sources:
+
+- Direct `jose` still useful for Google service-account JWT bearer assertions and custom JWT operations not modeled by `openid-client` APIs.
+
+### `oauth4webapi` vs `openid-client` (which one for this codebase?)
+
+Grounding from docs:
+
+- `oauth4webapi`: "Low-Level OAuth 2 / OpenID Connect Client API for JavaScript Runtimes."
+- `openid-client`: "simplifies integration with authorization servers..." and provides easier OAuth/OIDC flows.
+
+Practical decision:
+
+- If your preference is higher-level and less boilerplate: use `openid-client`.
+- If you want very explicit protocol-level control and minimal abstraction: use `oauth4webapi`.
+
+Code reduction expectation:
+
+- `openid-client` should reduce flow boilerplate vs `oauth4webapi` in callback + token lifecycle wiring.
+- `oauth4webapi` remains cleaner than fully manual raw `fetch` flow but still more verbose than `openid-client`.
 
 ### `@cloudflare/workers-oauth-provider`
 
@@ -172,20 +199,29 @@ Scope caveat:
 
 ## Recommended architecture options
 
-### Option A (recommended for user-connected Drive/Sheets): auth code + PKCE + `oauth4webapi`
+### Option A (recommended for this codebase): auth code + PKCE + `openid-client`
 
 Shape:
 
 1. Keep `beginGoogleOAuth` + `consumeGoogleOAuthState` in DO SQLite.
-2. Use `oauth4webapi` for authorization request and token exchange/refresh logic.
+2. Use `openid-client` for authorization URL, callback validation, token exchange, refresh.
 3. Keep Drive/Sheets calls as typed `fetch` wrappers.
 4. Keep Zod response validation for runtime safety.
 
 Why:
 
 - Edge-native.
-- Minimal lock-in.
-- Less manual OAuth boilerplate than current hand-rolled flow.
+- Highest code reduction for OAuth/OIDC plumbing.
+- Still compatible with Workers runtime.
+
+Let's go with option a.
+
+### Option A2 (lower-level alternative): auth code + PKCE + `oauth4webapi`
+
+Why:
+
+- Edge-native and explicit protocol control.
+- Good fit if you want fewer abstractions than `openid-client`.
 
 ### Option B (workspace automation): service account + `jose`
 
@@ -224,17 +260,43 @@ Why Discovery docs matter:
 - Google explicitly documents Discovery as the machine-readable API description to build client libraries.
 - This gives a path to typed generation without adopting Node-only runtime dependencies.
 
-More research needed on discovery for how an llm can use it to generate google api code and types. Also, how to generate types from it directly or with tools and not use llm.
+## Discovery-based generation without LLM
+
+Official discovery endpoints:
+
+- API directory endpoint: `https://discovery.googleapis.com/discovery/v1/apis`
+- Service discovery document endpoint pattern: `https://<api>/$discovery/rest?version=<version>`
+- Example Sheets discovery doc: `https://sheets.googleapis.com/$discovery/rest?version=v4`
+- Example Drive discovery doc: `https://www.googleapis.com/discovery/v1/apis/drive/v3/rest`
+
+Direct/tooling approach (non-LLM):
+
+1. Fetch discovery docs at build-time.
+2. Generate TS types from `schemas` and request/response types from method definitions.
+3. Generate thin typed client wrappers that still call runtime `fetch`.
+4. Regenerate on dependency/API version bump to stay in sync.
+
+Inference from sources:
+
+- Google docs describe discovery as machine-readable metadata for building clients.
+- I did not find an official Google-maintained TypeScript generator for Workers runtime from discovery docs.
+- Most robust path is an internal codegen step targeting only the methods you use.
+
+More research needed on this internal codegen step. What are viable tools for that and do we really want to use them in this project?
+How viable is it to have llm generate the code?
 
 ## Suggested next implementation spike
 
-1. Add `oauth4webapi` and move only token exchange/refresh flow first.
-2. Add `jose` only for `id_token` verification (small, high-value hardening).
-3. Add typed wrappers for current endpoints first:
+1. Add `openid-client`; migrate callback exchange + refresh flow first.
+2. Keep Drive/Sheets HTTP calls as-is in first migration step.
+3. Add direct `jose` only if/when you need:
+   - service-account JWT bearer flow
+   - custom JWT verification not covered by `openid-client` flow
+4. Add typed wrappers for current endpoints first:
    - Drive `files.list`
    - Sheets `spreadsheets.values.get`
    - Sheets `spreadsheets.values.append`
-4. Keep current storage tables and migration model.
+5. Keep current storage tables and migration model.
 
 ## Concrete mapping from current code to library adoption
 
@@ -246,9 +308,9 @@ Current hand-rolled pieces to replace incrementally:
 
 Incremental migration:
 
-1. Swap only token exchange + refresh to `oauth4webapi` first.
+1. Swap only token exchange + refresh to `openid-client` first.
 2. Keep Drive/Sheets fetch logic unchanged initially.
-3. Add `jose` only for `id_token` verification step.
+3. Add `jose` only when specific JWT use-cases require it.
 4. If needed later, add service-account support as separate auth mode.
 
 ## Sources
@@ -260,12 +322,19 @@ Incremental migration:
 - Cloudflare Workers Node.js compatibility: https://developers.cloudflare.com/workers/runtime-apis/nodejs/
 - `oauth4webapi`: https://github.com/panva/oauth4webapi
 - `oauth4webapi` API docs: https://jsr.io/@panva/oauth4webapi/doc
+- `oauth4webapi` package page (runtime + low-level description): https://www.npmjs.com/package/oauth4webapi
 - `jose`: https://github.com/panva/jose
 - `jose` docs site: https://jsr.io/@panva/jose/doc
+- `jose` package page (runtime + dependency note): https://www.npmjs.com/package/jose
 - `openid-client`: https://github.com/panva/openid-client
+- `openid-client` package page (runtime + high-level description): https://www.npmjs.com/package/openid-client
+- `openid-client` dependencies (`oauth4webapi`, `jose`): https://raw.githubusercontent.com/panva/openid-client/main/package.json
 - Cloudflare workers OAuth provider package: https://www.npmjs.com/package/@cloudflare/workers-oauth-provider
 - Google Discovery overview: https://developers.google.com/discovery
+- Google API Discovery usage guide: https://developers.google.com/discovery/v1/using
 - Build client libraries from discovery docs: https://docs.cloud.google.com/docs/discovery/build-client-library
+- Sheets discovery document: https://sheets.googleapis.com/$discovery/rest?version=v4
+- Drive discovery document: https://www.googleapis.com/discovery/v1/apis/drive/v3/rest
 - Orval fetch client (edge-capable generation option): https://orval.dev/docs/guides/fetch/
 - MCP OAuth docs in refs: `refs/agents/docs/securing-mcp-servers.md:3`
 - MCP OAuth wiring in refs: `refs/agents/packages/agents/src/index.ts:686`
