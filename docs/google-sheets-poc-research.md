@@ -2,7 +2,7 @@
 
 ## TL;DR
 
-- Use **Google Sheets API first**.
+- Use **Google Sheets + Drive** for the POC.
 - Keep Google OAuth separate from Better Auth.
 - Store Google OAuth artifacts in the **organization agent Durable Object SQLite**.
 - One Google connection per organization agent is feasible.
@@ -49,6 +49,30 @@ Reference:
 
 - https://developers.google.com/identity/protocols/oauth2/web-server
 
+### What "scopes" mean (plain language)
+
+- A scope is a permission string your app asks Google for.
+- Example: `.../auth/spreadsheets` means your app can read/write Sheets the user can access.
+- You can request multiple scopes in one OAuth flow.
+- User sees one consent screen listing all requested permissions.
+
+Example scope set for your desired UX:
+
+- `https://www.googleapis.com/auth/spreadsheets` (read/write sheet content)
+- `https://www.googleapis.com/auth/drive.readonly` (list existing spreadsheets in Drive)
+
+If later you want Docs too, add:
+
+- `https://www.googleapis.com/auth/documents`
+
+References:
+
+- https://developers.google.com/workspace/sheets/api/scopes
+- https://developers.google.com/workspace/drive/api/guides/api-specific-auth
+- https://developers.google.com/workspace/docs/api/auth
+
+If it's simple to have all 3 scopes in the oauth flow, then we should do that.
+
 ## Clarifying your questions
 
 ### Why ask for a "first action"?
@@ -57,7 +81,9 @@ Because OAuth scopes should match first capability. POC is easier if we define o
 
 - "Create a spreadsheet and append a row"
 
-Then scope/API/storage can be minimal.
+Then scope/API/storage can be minimal and easier to debug.
+
+We want to simply list the files in google drive first.
 
 ### Why might `spreadsheetId` be required?
 
@@ -71,7 +97,7 @@ POC options:
 
 If you want users to pick existing spreadsheets, add a listing step.
 
-Important detail: listing spreadsheets is generally a **Drive API** concern (`files.list` with spreadsheet mime type), not a Sheets API endpoint. So this introduces Drive scope/API even if write actions remain Sheets.
+Important detail: listing spreadsheets is generally a **Drive API** concern (`files.list` with spreadsheet mime type), not a Sheets API endpoint. So the practical POC shape is Drive (list/select) + Sheets (read/write).
 
 References:
 
@@ -79,7 +105,11 @@ References:
 - https://developers.google.com/workspace/drive/api/guides/mime-types
 - https://developers.google.com/workspace/sheets/api/scopes
 
-Hmmm, it makes sense that drive seems to be primary focus. Perhaps we should focus on drive first for the poc. is there a way scopes or some such in the oauth flow for drive, sheets, and docs in one go? I still don't understand oath to know even what scopes are or the oauth flow.
+Can we request Drive + Sheets + Docs in one go?
+
+- Yes. One OAuth redirect can request multiple scopes together.
+- Google returns tokens whose permissions are the union of granted scopes.
+- For POC, prefer fewer scopes first, then add more later if needed.
 
 ## Grounding in current codebase
 
@@ -126,10 +156,13 @@ What it is not:
 POC guidance:
 
 - Reuse the same design patterns (state table, token persistence, callback validation).
-
-Are you saying we should use the same tables as the agent implementation for MCP? Is that wise? It seems like we really can't use Agents SDK OAuth or am i misunderstanding. need more context and guidance here. 
-
 - Implement Google OAuth explicitly for your organization-agent integration.
+
+Direct answer on tables:
+
+- Do **not** reuse MCP OAuth tables (`cf_agents_mcp_servers` etc.) for Google Sheets integration.
+- Do reuse the architectural pattern only: store OAuth state + refresh token durably in DO storage.
+- Keep your own Google-specific tables (`GoogleConnection`, `GoogleOAuthState`, `GoogleSheetsConfig`, optional cache).
 
 ## Durable Object hibernation and token persistence
 
@@ -219,7 +252,7 @@ Notes:
 - Keep one-row semantics with `id = 1` constraint.
 - For stricter security, encrypt `refreshToken` before storage using a Worker secret key.
 
-## Minimal OAuth + Sheets API flow for POC
+## Minimal OAuth + Drive+Sheets API flow for POC
 
 1. UI invokes `connectGoogleSheets` action on an org page
 2. Server generates OAuth `state` (and PKCE verifier if used), stores in `GoogleOAuthState`
@@ -235,7 +268,13 @@ Recommended scopes for this specific UX:
 - Fastest implementation: `spreadsheets` + `drive.readonly`
 - Lower-risk alternative: `spreadsheets` + Google Picker + `drive.file` (more moving parts, less broad Drive access)
 
-fastest implementation is too restrictive. we'll want to be able to write and save.
+Clarification:
+
+- `spreadsheets` already allows read/write sheet data.
+- `drive.readonly` is only for listing/metadata in Drive.
+- So `spreadsheets` + `drive.readonly` supports your POC need: pick existing spreadsheet, then write/save cells.
+
+If you later need file-level Drive mutations (rename/move/share/create in Drive), add broader Drive scope.
 
 References:
 
