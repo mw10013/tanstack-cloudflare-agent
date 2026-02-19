@@ -234,3 +234,73 @@ I would start with 1 + 2.
 ## Bottom Line
 
 Effect Schema v4 is viable as a Zod replacement for this codebase’s own validation logic, including TanStack Start/Router integration, as long as we respect the sync requirement for `validateSearch` and avoid service-dependent schemas in runtime-only validation paths.
+
+## Decode API Comparison (Outside Effect Runtime)
+
+Grounding in Effect v4 source:
+
+- Available decode entrypoints are `decodeUnknownEffect`, `decodeUnknownExit`, `decodeUnknownOption`, `decodeUnknownPromise`, `decodeUnknownSync` (`refs/effect4/packages/effect/src/Schema.ts:713`, `refs/effect4/packages/effect/src/Schema.ts:733`, `refs/effect4/packages/effect/src/Schema.ts:752`, `refs/effect4/packages/effect/src/Schema.ts:764`, `refs/effect4/packages/effect/src/Schema.ts:776`).
+- There is no `decodeUnknownEither` export in this repo version.
+- Sync non-Effect entrypoints require `DecodingServices: never` (`refs/effect4/packages/effect/src/Schema.ts:733`, `refs/effect4/packages/effect/src/SchemaParser.ts:164`).
+
+### What’s viable for your websocket/message handlers
+
+1. `Schema.decodeUnknownExit(schema)(input)`
+- Return: `Exit<Parsed, SchemaError>`.
+- Failure handling: explicit branch (`Exit.isFailure`).
+- Throws: can throw for async/service-dependent schemas (`refs/effect4/packages/effect/test/schema/Schema.test.ts:6022`).
+- Fit: best match for non-throwing, explicit control flow in UI handlers.
+
+2. `Schema.decodeUnknownOption(schema)(input)`
+- Return: `Option<Parsed>`.
+- Failure handling: `None` only, no structured error at callsite.
+- Implementation drops failure cause by extracting success only (`refs/effect4/packages/effect/src/SchemaParser.ts:328`).
+- Fit: good only if you intentionally ignore parse details.
+
+3. `Schema.decodeUnknownSync(schema)(input)`
+- Return: parsed value or throws.
+- Throw behavior comes from `asSync` wrapping issue into `Error` (`refs/effect4/packages/effect/src/SchemaParser.ts:335`).
+- Fit: terse in scripts/tests; worse for event streams unless wrapped in `try/catch`.
+
+4. `Schema.decodeUnknownPromise(schema)(input)`
+- Return: `Promise<Parsed>` (rejects on failure) (`refs/effect4/packages/effect/test/schema/Schema.test.ts:6004`).
+- Fit: useful if caller is already async and you prefer Promise semantics.
+
+5. `Schema.decodeUnknownEffect(schema)(input)`
+- Return: `Effect<Parsed, SchemaError, DecodingServices>`.
+- Fit: best when you are already in Effect program composition; usually overkill in React event callbacks.
+
+### Current codebase fit
+
+Current migrated handlers use inline `decodeUnknownExit`:
+
+- `src/routes/app.$organizationId.workflow.tsx:81`
+- `src/routes/app.$organizationId.upload.tsx:183`
+
+This is the strongest default for your stated style (outside Effect, no Zod-like `{ success, data }` wrapper).
+
+### Additional viable refinement
+
+For websocket `event.data` (string payload), you can remove manual `JSON.parse` and decode in one step:
+
+- Use `Schema.fromJsonString(organizationMessageSchema)` (`refs/effect4/packages/effect/src/Schema.ts:6626`)
+- Then `Schema.decodeUnknownExit(...)` on the raw string.
+
+This turns malformed JSON into a schema decode failure instead of a thrown `JSON.parse` exception.
+
+Pattern:
+
+```ts
+const result = Schema.decodeUnknownExit(
+  Schema.fromJsonString(organizationMessageSchema),
+)(String(event.data))
+if (Exit.isFailure(result)) return
+if (result.value.type === "classification_updated") {
+  void router.invalidate()
+}
+```
+
+Applied in repo:
+
+- `src/routes/app.$organizationId.workflow.tsx`
+- `src/routes/app.$organizationId.upload.tsx`

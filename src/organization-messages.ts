@@ -1,15 +1,61 @@
-import * as z from "zod";
+import * as Schema from "effect/Schema";
 
-export const organizationMessageSchema = z.discriminatedUnion("type", [
-  z.object({ type: z.literal("upload_error"), name: z.string(), error: z.string() }),
-  z.object({ type: z.literal("upload_deleted"), name: z.string(), eventTime: z.number() }),
-  z.object({ type: z.literal("workflow_progress"), workflowId: z.string(), progress: z.object({ status: z.string(), message: z.string() }) }),
-  z.object({ type: z.literal("workflow_complete"), workflowId: z.string(), result: z.object({ approved: z.boolean() }).optional() }),
-  z.object({ type: z.literal("workflow_error"), workflowId: z.string(), error: z.string() }),
-  z.object({ type: z.literal("approval_requested"), workflowId: z.string(), title: z.string() }),
-  z.object({ type: z.literal("classification_workflow_started"), name: z.string(), idempotencyKey: z.string() }),
-  z.object({ type: z.literal("classification_updated"), name: z.string(), idempotencyKey: z.string(), label: z.string(), score: z.number() }),
-  z.object({ type: z.literal("classification_error"), name: z.string(), idempotencyKey: z.string(), error: z.string() }),
+export const organizationMessageSchema = Schema.Union([
+  Schema.Struct({
+    type: Schema.Literal("upload_error"),
+    name: Schema.String,
+    error: Schema.String,
+  }),
+  Schema.Struct({
+    type: Schema.Literal("upload_deleted"),
+    name: Schema.String,
+    eventTime: Schema.Number,
+  }),
+  Schema.Struct({
+    type: Schema.Literal("workflow_progress"),
+    workflowId: Schema.String,
+    progress: Schema.Struct({
+      status: Schema.String,
+      message: Schema.String,
+    }),
+  }),
+  Schema.Struct({
+    type: Schema.Literal("workflow_complete"),
+    workflowId: Schema.String,
+    result: Schema.optionalKey(
+      Schema.Struct({
+        approved: Schema.Boolean,
+      }),
+    ),
+  }),
+  Schema.Struct({
+    type: Schema.Literal("workflow_error"),
+    workflowId: Schema.String,
+    error: Schema.String,
+  }),
+  Schema.Struct({
+    type: Schema.Literal("approval_requested"),
+    workflowId: Schema.String,
+    title: Schema.String,
+  }),
+  Schema.Struct({
+    type: Schema.Literal("classification_workflow_started"),
+    name: Schema.String,
+    idempotencyKey: Schema.String,
+  }),
+  Schema.Struct({
+    type: Schema.Literal("classification_updated"),
+    name: Schema.String,
+    idempotencyKey: Schema.String,
+    label: Schema.String,
+    score: Schema.Number,
+  }),
+  Schema.Struct({
+    type: Schema.Literal("classification_error"),
+    name: Schema.String,
+    idempotencyKey: Schema.String,
+    error: Schema.String,
+  }),
 ]);
 
-export type OrganizationMessage = z.infer<typeof organizationMessageSchema>;
+export type OrganizationMessage = typeof organizationMessageSchema.Type;

@@ -1,5 +1,4 @@
 import type { OrganizationAgent } from "@/organization-agent";
-import { organizationMessageSchema } from "@/organization-messages";
 import { useForm } from "@tanstack/react-form";
 import { useMutation } from "@tanstack/react-query";
 import {
@@ -9,6 +8,8 @@ import {
 } from "@tanstack/react-router";
 import { createServerFn } from "@tanstack/react-start";
 import { useAgent } from "agents/react";
+import * as Exit from "effect/Exit";
+import * as Schema from "effect/Schema";
 import { AlertCircle, Check, Play, X } from "lucide-react";
 import * as z from "zod";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
@@ -29,6 +30,7 @@ import {
 } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
 import { Spinner } from "@/components/ui/spinner";
+import { organizationMessageSchema } from "@/organization-messages";
 
 const getLoaderData = createServerFn({ method: "GET" })
   .inputValidator((organizationId: string) => organizationId)
@@ -76,13 +78,15 @@ function RouteComponent() {
     agent: "organization-agent",
     name: organizationId,
     onMessage: (event) => {
-      const result = organizationMessageSchema.safeParse(JSON.parse(String(event.data)));
-      if (!result.success) return;
+      const result = Schema.decodeUnknownExit(
+        Schema.fromJsonString(organizationMessageSchema),
+      )(String(event.data));
+      if (Exit.isFailure(result)) return;
       if (
-        result.data.type === "workflow_progress" ||
-        result.data.type === "workflow_complete" ||
-        result.data.type === "workflow_error" ||
-        result.data.type === "approval_requested"
+        result.value.type === "workflow_progress" ||
+        result.value.type === "workflow_complete" ||
+        result.value.type === "workflow_error" ||
+        result.value.type === "approval_requested"
       ) {
         void router.invalidate();
       }

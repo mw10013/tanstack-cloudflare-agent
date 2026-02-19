@@ -13,6 +13,8 @@ import {
 } from "@tanstack/react-router";
 import { createServerFn, useServerFn } from "@tanstack/react-start";
 import { useAgent } from "agents/react";
+import * as Exit from "effect/Exit";
+import * as Schema from "effect/Schema";
 import {
   AlertCircle,
   Check,
@@ -178,15 +180,19 @@ function RouteComponent() {
     agent: "organization-agent",
     name: organizationId,
     onMessage: (event) => {
-      const result = organizationMessageSchema.safeParse(JSON.parse(String(event.data)));
-      if (!result.success) return;
-      if (result.data.type !== "upload_deleted") {
-        setMessages((prev) => [result.data, ...prev]);
+      const result = Schema.decodeUnknownExit(
+        Schema.fromJsonString(organizationMessageSchema),
+      )(
+        String(event.data),
+      );
+      if (Exit.isFailure(result)) return;
+      if (result.value.type !== "upload_deleted") {
+        setMessages((prev) => [result.value, ...prev]);
       }
       if (
-        result.data.type === "upload_deleted" ||
-        result.data.type === "classification_updated" ||
-        result.data.type === "classification_error"
+        result.value.type === "upload_deleted" ||
+        result.value.type === "classification_updated" ||
+        result.value.type === "classification_error"
       ) {
         void router.invalidate();
       }
