@@ -10,7 +10,17 @@ Main constraints:
 - Effect schemas used via Standard Schema should avoid Effect service dependencies.
 - TanStack docs show an older Effect API in one snippet (`standardSchemaV1`, `withDefaults`) while Effect v4 here uses `toStandardSchemaV1`, `withDecodingDefault*`, `withConstructorDefault`.
 
-Is this a show-stopper? Does this mean Effect v4 schemas cannot work with TanStack?
+### Answer to Your Annotation: Is the API naming mismatch a show-stopper?
+
+No. Not a show-stopper.
+
+Why:
+
+- TanStack consumes the Standard Schema contract (`~standard.validate`), not a specific Effect helper name.
+- Effect v4 provides that contract via `Schema.toStandardSchemaV1(...)` (`refs/effect4/packages/effect/src/Schema.ts:535`).
+- TanStack Router docs already state Effect/Schema works without an adapter (`refs/tan-start/docs/router/framework/react/guide/search-params.md:323`).
+
+So the doc snippet using `standardSchemaV1/withDefaults` is version drift in examples, not an integration blocker.
 
 ## Grounded Evidence
 
@@ -117,6 +127,8 @@ Project currently has both deps:
 - `zod` at `package.json:114`
 
 Zod imported in 21 `src/` files (`rg -l "from \"zod\"" src`).
+- 13 route files
+- 8 non-route files
 
 Key integration points:
 
@@ -124,6 +136,30 @@ Key integration points:
 - Domain codecs and entity schemas, e.g. `src/lib/domain.ts:10`, `src/lib/domain.ts:19`.
 - Repository DB parse layer, e.g. `src/lib/repository.ts:36`, `src/lib/repository.ts:90`.
 - Worker/agent inbound event validation, e.g. `src/worker.ts:135`.
+
+## Inventory: Zod Outside TanStack API Args
+
+### A) Fully outside TanStack route/server-fn API arguments
+
+These are strong spike candidates:
+
+- `src/lib/google-client.ts:3` (`parse/safeParse` on Google API responses)
+- `src/lib/google-oauth-client.ts:14` (`parse` token response)
+- `src/lib/stripe-service.ts:28` (`safeParse` cached plans)
+- `src/lib/domain.ts:10` (`z.codec`, domain schemas, enums)
+- `src/lib/repository.ts:36` (DB boundary parse layer)
+- `src/organization-agent.ts:23` (agent state/event/SQL parse boundaries)
+- `src/organization-messages.ts:3` (shared discriminated union schema)
+- `src/worker.ts:135` (queue message validation)
+
+### B) Not passed directly as TanStack API arg, but used inside route implementation
+
+Relevant to your note:
+
+- `src/routes/app.$organizationId.upload.tsx:71` local `z.object(...).parse(...)` inside `inputValidator` function body
+- `src/routes/app.$organizationId.workflow.tsx:79` `organizationMessageSchema.safeParse(...)` in `useAgent` message handler
+- `src/routes/app.$organizationId.upload.tsx:181` `organizationMessageSchema.safeParse(...)` in `useAgent` message handler
+- `src/routes/app.$organizationId.invitations.tsx:126` `z.email().safeParse(...)` in `refine(...)`
 
 ## Can We Replace Zod Here?
 
@@ -158,14 +194,26 @@ Many dependencies still bring or expect Zod transitively (`pnpm-lock.yaml` has m
 
 ## Recommended Incremental Plan
 
-1. Migrate `validateSearch` schemas first (small, high leverage, 5 route files).
-2. Migrate `createServerFn` input validators next, keeping them service-free and mostly sync.
-3. Migrate domain/repository parse boundary (`src/lib/domain.ts`, `src/lib/repository.ts`).
-4. Migrate worker/agent payload schemas (`src/worker.ts`, `src/organization-agent.ts`, `src/organization-messages.ts`).
-5. Keep hybrid mode while transitive dependencies still use Zod.
+1. Spike on a non-TanStack-arg boundary first: `src/lib/google-client.ts` + `src/lib/google-oauth-client.ts`.
+2. Migrate `organizationMessageSchema` and its two route consumers (`src/organization-messages.ts`, `src/routes/app.$organizationId.workflow.tsx:79`, `src/routes/app.$organizationId.upload.tsx:181`).
+3. Migrate `validateSearch` schemas (5 files), keeping them strictly sync.
+4. Migrate `createServerFn` input validators.
+5. Migrate domain/repository parse boundary (`src/lib/domain.ts`, `src/lib/repository.ts`).
+6. Keep hybrid mode while transitive dependencies still use Zod.
+
+## Answer to Your Second Annotation
+
+Yes, there are many Zod schemas used outside TanStack API arguments in this codebase.
+
+Best first spike that avoids TanStack API-arg coupling:
+
+1. `src/lib/google-client.ts`
+2. `src/lib/google-oauth-client.ts`
+
+These are pure parse/validation boundaries and should let us validate Effect Schema ergonomics with minimal routing/server-fn risk.
+
+google is not a good spike because I would need to manually authenticate my google account to test. what are other candidates?
 
 ## Bottom Line
 
 Effect Schema v4 is viable as a Zod replacement for this codebase’s own validation logic, including TanStack Start/Router integration, as long as we respect the sync requirement for `validateSearch` and avoid service-dependent schemas in runtime-only validation paths.
-
-Are there any zod schemas that are used outside of tanstack apis in the codebase. What I mean by this is that a zod schema is not passed into a TanStack api. However, if within the implementation of a TanStack handler or some such and a zod schema is used, but not passed in, that is a relevant case. Trying to figure out how to spike this and my thinking is that we should try it on code that doesn't get caught up in TanStack api args.
