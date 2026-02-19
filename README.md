@@ -162,6 +162,48 @@ npm install -g @openai/codex
 
 - OpenAI model docs: GPT-5.2-Codex supports low, medium, high, xhigh
 
+## Ledger
+
+```
+https://www.pgrs.net/2025/06/17/double-entry-ledgers-missing-primitive-in-modern-software/
+https://dev.to/lerian/what-is-double-entry-and-how-to-use-it-on-a-financial-operation-1ae5
+
+```
+
+Several programming blog posts highlight that the 500-year-old principles of double-entry accounting are actually powerful **state-management patterns** for maintaining data integrity, even when you aren't building a finance app.
+
+The core idea is that instead of updating a single "balance" field (e.g., `inventory = inventory - 1`), you treat every change as a movement of value between two "buckets" (accounts). This ensures that nothing is ever "lost" or "created from nothing."
+
+### Key Blog Posts and Use Cases
+
+#### 1. Tracking State Machines and Distributed Value
+**Blog:** [Books, an immutable double-entry accounting database service](https://developer.squareup.com/blog/books-an-immutable-double-entry-accounting-database-service/) (Square Engineering)
+*   **The Concept:** Square treats different stages of a payment (Pending, Refunded, Paid Out) as "books."
+*   **Non-Accounting Use:** They describe it as a **state machine** where they "move pennies" between states. By using double-entry, they ensure that the total number of pennies in the system remains constant, making it impossible for a bug to "lose" a transaction in transit between states.
+
+#### 2. API Quotas and Content Moderation
+**Blog:** [Double-Entry Ledgers: The Missing Primitive in Modern Software](https://pgrs.net/2025/06/17/double-entry-ledgers-the-missing-primitive-in-modern-software/) (Paul Gross)
+*   **API Usage:** Instead of a simple integer for "remaining credits," you use a ledger. Buying credits "debits" the system's quota and "credits" the user's account. Spending credits moves them to a "Usage" account.
+*   **Content Moderation:** Gross suggests tracking user behavior like a ledger: "Offenses" are one account, "Warnings" are another, and "Appeals" are a third. This creates a perfect audit trail of why a user was banned, rather than just having a `is_banned` boolean.
+
+#### 3. Inventory and Logistics Management
+**Blog:** [What is Double Entry and how to use it on a financial operation](https://dev.to/matheus_m_guimaraes/what-is-double-entry-and-how-to-use-it-on-a-financial-operation-1k1j) (Matheus Guimarães)
+*   **Physical Goods:** The post explains that double-entry is essential for logistics. When a product moves from a warehouse to a delivery truck, it is "credited" from Warehouse A and "debited" to Truck B. If the truck breaks down, the "value" (the item) is still sitting in the Truck B account, preventing it from disappearing from the database.
+
+#### 4. Conceptual Parallels: Double-Entry vs. Testing (BDD)
+**Blog:** [What Software Development Can Learn from Double-Entry Bookkeeping](https://itsadeliverything.com/what-software-development-can-learn-from-double-entry-bookkeeping)
+*   **The Analogy:** This post argues that **Behaviour-Driven Development (BDD)** is the "double-entry" of programming. Just as accounting requires two entries (debit/credit) to verify a transaction, BDD requires two records (the test and the code) to verify a feature. If they don't "balance" (pass), you know exactly where the error lies.
+
+#### 5. Database Integrity and Audit Trails
+**Blog:** [Why Every Developer Should Know About Double-Entry Bookkeeping: And It's Not About Accounting](https://freerangetolic.com/blog/double_entry_bookkeeping_for_developers/) (Tolics Engineering)
+*   **The Argument:** Simple `UPDATE` statements are "ticking time bombs." If a database crash happens mid-update, you lose data.
+*   **General Use:** The post suggests using double-entry for **loyalty points, upvote systems, or gaming energy**. It turns "state" into "events," allowing you to reconstruct a user's status at any point in history just by summing the ledger entries.
+
+### Summary of "Non-Accounting" Benefits
+*   **Auditability:** You never ask "How did this value get here?" The history is baked into the movement.
+*   **Immutability:** You never delete or overwrite; you only add "reversing entries" to fix mistakes, which is a core principle of reliable distributed systems.
+*   **Error Detection:** If the sum of all "accounts" in your system doesn't equal zero (or your starting constant), you have a bug. It's a built-in "checksum" for your entire application state.
+
 ## Credit
 
 Homepage / Pricing design by [dev-xo](https://github.com/dev-xo). See his [remix-saas](https://github.com/dev-xo/remix-saas) for a production-ready saas template for remix.
