@@ -152,6 +152,12 @@ These are strong spike candidates:
 - `src/organization-messages.ts:3` (shared discriminated union schema)
 - `src/worker.ts:135` (queue message validation)
 
+Practical note for spiking:
+
+- Google modules require OAuth/manual account flow to fully validate runtime behavior.
+- Stripe service may require live API keys/network behavior if cache is cold.
+- `organization-messages` and worker queue payload parsing are fully local and easiest to spike first.
+
 ### B) Not passed directly as TanStack API arg, but used inside route implementation
 
 Relevant to your note:
@@ -194,7 +200,7 @@ Many dependencies still bring or expect Zod transitively (`pnpm-lock.yaml` has m
 
 ## Recommended Incremental Plan
 
-1. Spike on a non-TanStack-arg boundary first: `src/lib/google-client.ts` + `src/lib/google-oauth-client.ts`.
+1. Spike on a non-TanStack-arg boundary first with no external auth: `src/organization-messages.ts` + worker queue payload validation in `src/worker.ts`.
 2. Migrate `organizationMessageSchema` and its two route consumers (`src/organization-messages.ts`, `src/routes/app.$organizationId.workflow.tsx:79`, `src/routes/app.$organizationId.upload.tsx:181`).
 3. Migrate `validateSearch` schemas (5 files), keeping them strictly sync.
 4. Migrate `createServerFn` input validators.
@@ -207,12 +213,23 @@ Yes, there are many Zod schemas used outside TanStack API arguments in this code
 
 Best first spike that avoids TanStack API-arg coupling:
 
-1. `src/lib/google-client.ts`
-2. `src/lib/google-oauth-client.ts`
+1. `src/organization-messages.ts`
+2. worker queue payload validation in `src/worker.ts`
 
 These are pure parse/validation boundaries and should let us validate Effect Schema ergonomics with minimal routing/server-fn risk.
 
-google is not a good spike because I would need to manually authenticate my google account to test. what are other candidates?
+## Answer to Your Third Annotation
+
+Agreed. Google is not a good first spike if it requires manual auth.
+
+Better candidates:
+
+1. `src/organization-messages.ts`
+2. worker queue payload parsing in `src/worker.ts`
+3. `src/lib/domain.ts` (larger blast radius, but still local)
+4. `src/lib/repository.ts` parse blocks (medium blast radius)
+
+I would start with 1 + 2.
 
 ## Bottom Line
 
