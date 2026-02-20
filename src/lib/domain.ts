@@ -1,4 +1,5 @@
-import * as z from "zod";
+import * as Schema from "effect/Schema";
+import * as SchemaTransformation from "effect/SchemaTransformation";
 
 /**
  * Domain schemas and inferred types for the application.
@@ -7,50 +8,56 @@ import * as z from "zod";
  * Schemas must align with corresponding database tables especially code tables for roles and statuses.
  */
 
-const intToBoolean = z.codec(z.number().int(), z.boolean(), {
-  decode: (num) => num !== 0,
-  encode: (bool) => (bool ? 1 : 0),
-});
+const intToBoolean = Schema.Int.pipe(
+  Schema.decodeTo(
+    Schema.Boolean,
+    SchemaTransformation.transform({
+      decode: (num) => num !== 0,
+      encode: (bool) => (bool ? 1 : 0),
+    }),
+  ),
+);
 
 /**
  * Custom codec for ISO datetime strings. Can't use z.iso() because it expects 'T' separator,
  * but SQLite supports ISO strings without 'T' (e.g., "2023-01-01 12:00:00").
  */
-const isoDatetimeToDate = z.codec(z.string(), z.date(), {
-  decode: (str, ctx) => {
-    const date = new Date(str);
-    if (isNaN(date.getTime())) {
-      ctx.issues.push({
-        code: "invalid_format",
-        format: "datetime",
-        input: str,
-        message: `Invalid datetime: ${str}`,
-      });
-      return z.NEVER; // Abort processing
-    }
-    return date;
-  },
-  encode: (date) => date.toISOString(),
-});
+const isoDatetimeToDate = Schema.String.pipe(
+  Schema.decodeTo(
+    Schema.DateValid,
+    SchemaTransformation.transform({
+      decode: (str) => new Date(str),
+      encode: (date) => date.toISOString(),
+    }),
+  ),
+);
 
-export const UserRole = z.enum(["user", "admin"]);
-export type UserRole = z.infer<typeof UserRole>;
+const emailSchema = Schema.String.check(
+  Schema.isPattern(/^[^\s@]+@[^\s@]+\.[^\s@]+$/),
+);
 
-export const MemberRole = z.enum(["member", "owner", "admin"]);
-export type MemberRole = z.infer<typeof MemberRole>;
+export const UserRoleValues = ["user", "admin"] as const;
+export const UserRole = Schema.Literals(UserRoleValues);
+export type UserRole = typeof UserRole.Type;
 
-export const InvitationStatus = z.enum([
+export const MemberRoleValues = ["member", "owner", "admin"] as const;
+export const AssignableMemberRoleValues = ["member", "admin"] as const;
+export const MemberRole = Schema.Literals(MemberRoleValues);
+export type MemberRole = typeof MemberRole.Type;
+
+export const InvitationStatusValues = [
   "pending",
   "accepted",
   "rejected",
   "canceled",
-]);
-export type InvitationStatus = z.infer<typeof InvitationStatus>;
+] as const;
+export const InvitationStatus = Schema.Literals(InvitationStatusValues);
+export type InvitationStatus = typeof InvitationStatus.Type;
 
 /**
  * Subscription status values that must align with Stripe's Subscription.Status.
  */
-export const SubscriptionStatus = z.enum([
+export const SubscriptionStatusValues = [
   "active",
   "canceled",
   "incomplete",
@@ -59,59 +66,60 @@ export const SubscriptionStatus = z.enum([
   "paused",
   "trialing",
   "unpaid",
-]);
-export type SubscriptionStatus = z.infer<typeof SubscriptionStatus>;
+] as const;
+export const SubscriptionStatus = Schema.Literals(SubscriptionStatusValues);
+export type SubscriptionStatus = typeof SubscriptionStatus.Type;
 
-export const Invitation = z.object({
-  id: z.string(),
-  email: z.email(),
-  inviterId: z.string(),
-  organizationId: z.string(),
+export const Invitation = Schema.Struct({
+  id: Schema.String,
+  email: emailSchema,
+  inviterId: Schema.String,
+  organizationId: Schema.String,
   role: MemberRole,
   status: InvitationStatus,
   expiresAt: isoDatetimeToDate,
 });
-export type Invitation = z.infer<typeof Invitation>;
+export type Invitation = typeof Invitation.Type;
 
-export const User = z.object({
-  id: z.string(),
-  name: z.string(),
-  email: z.email(),
+export const User = Schema.Struct({
+  id: Schema.String,
+  name: Schema.String,
+  email: emailSchema,
   emailVerified: intToBoolean,
-  image: z.string().nullable(),
+  image: Schema.NullOr(Schema.String),
   role: UserRole,
   banned: intToBoolean,
-  banReason: z.string().nullable(),
-  banExpires: z.nullable(isoDatetimeToDate),
-  stripeCustomerId: z.string().nullable(),
+  banReason: Schema.NullOr(Schema.String),
+  banExpires: Schema.NullOr(isoDatetimeToDate),
+  stripeCustomerId: Schema.NullOr(Schema.String),
   createdAt: isoDatetimeToDate,
   updatedAt: isoDatetimeToDate,
 });
-export type User = z.infer<typeof User>;
+export type User = typeof User.Type;
 
-export const Session = z.object({
-  id: z.string(),
+export const Session = Schema.Struct({
+  id: Schema.String,
   expiresAt: isoDatetimeToDate,
-  token: z.string(),
+  token: Schema.String,
   createdAt: isoDatetimeToDate,
   updatedAt: isoDatetimeToDate,
-  ipAddress: z.string().nullable(),
-  userAgent: z.string().nullable(),
-  userId: z.string(),
-  impersonatedBy: z.string().nullable(),
-  activeOrganizationId: z.string().nullable(),
+  ipAddress: Schema.NullOr(Schema.String),
+  userAgent: Schema.NullOr(Schema.String),
+  userId: Schema.String,
+  impersonatedBy: Schema.NullOr(Schema.String),
+  activeOrganizationId: Schema.NullOr(Schema.String),
 });
-export type Session = z.infer<typeof Session>;
+export type Session = typeof Session.Type;
 
-export const Organization = z.object({
-  id: z.string(),
-  name: z.string().nonempty(),
-  slug: z.string().nonempty(),
-  logo: z.string().nullable(),
-  metadata: z.string().nullable(),
+export const Organization = Schema.Struct({
+  id: Schema.String,
+  name: Schema.NonEmptyString,
+  slug: Schema.NonEmptyString,
+  logo: Schema.NullOr(Schema.String),
+  metadata: Schema.NullOr(Schema.String),
   createdAt: isoDatetimeToDate,
 });
-export type Organization = z.infer<typeof Organization>;
+export type Organization = typeof Organization.Type;
 
 export const planData = [
   // in display order
@@ -137,56 +145,62 @@ export const planData = [
   },
 ] as const;
 
-export const Plan = z.object({
-  name: z.string().nonempty(),
-  displayName: z.string().nonempty(),
-  description: z.string().nonempty(),
-  productId: z.string().nonempty(),
-  monthlyPriceId: z.string().nonempty(),
-  monthlyPriceLookupKey: z.string(),
-  monthlyPriceInCents: z.number().int(),
-  annualPriceId: z.string().nonempty(),
-  annualPriceLookupKey: z.string().nonempty(),
-  annualPriceInCents: z.number().int(),
-  freeTrialDays: z.number().int(),
+export const Plan = Schema.Struct({
+  name: Schema.NonEmptyString,
+  displayName: Schema.NonEmptyString,
+  description: Schema.NonEmptyString,
+  productId: Schema.NonEmptyString,
+  monthlyPriceId: Schema.NonEmptyString,
+  monthlyPriceLookupKey: Schema.String,
+  monthlyPriceInCents: Schema.Int,
+  annualPriceId: Schema.NonEmptyString,
+  annualPriceLookupKey: Schema.NonEmptyString,
+  annualPriceInCents: Schema.Int,
+  freeTrialDays: Schema.Int,
 });
-export type Plan = z.infer<typeof Plan>;
+export type Plan = typeof Plan.Type;
 
-export const Subscription = z.object({
-  id: z.string(),
-  plan: z.string().nonempty(),
-  referenceId: z.string(),
-  stripeCustomerId: z.string().nullable(),
-  stripeSubscriptionId: z.string().nullable(),
+export const Subscription = Schema.Struct({
+  id: Schema.String,
+  plan: Schema.NonEmptyString,
+  referenceId: Schema.String,
+  stripeCustomerId: Schema.NullOr(Schema.String),
+  stripeSubscriptionId: Schema.NullOr(Schema.String),
   status: SubscriptionStatus,
-  periodStart: z.nullable(isoDatetimeToDate),
-  periodEnd: z.nullable(isoDatetimeToDate),
+  periodStart: Schema.NullOr(isoDatetimeToDate),
+  periodEnd: Schema.NullOr(isoDatetimeToDate),
   cancelAtPeriodEnd: intToBoolean,
-  seats: z.number().int().nullable(),
-  trialStart: z.nullable(isoDatetimeToDate),
-  trialEnd: z.nullable(isoDatetimeToDate),
+  seats: Schema.NullOr(Schema.Int),
+  trialStart: Schema.NullOr(isoDatetimeToDate),
+  trialEnd: Schema.NullOr(isoDatetimeToDate),
 });
-export type Subscription = z.infer<typeof Subscription>;
+export type Subscription = typeof Subscription.Type;
 
-export const UserWithSubscription = User.extend({
-  subscription: Subscription.nullable(),
-});
-export type UserWithSubscription = z.infer<typeof UserWithSubscription>;
+export const UserWithSubscription = User.pipe(
+  Schema.fieldsAssign({
+    subscription: Schema.NullOr(Subscription),
+  }),
+);
+export type UserWithSubscription = typeof UserWithSubscription.Type;
 
-export const SubscriptionWithUser = Subscription.extend({
-  user: User,
-});
-export type SubscriptionWithUser = z.infer<typeof SubscriptionWithUser>;
+export const SubscriptionWithUser = Subscription.pipe(
+  Schema.fieldsAssign({
+    user: User,
+  }),
+);
+export type SubscriptionWithUser = typeof SubscriptionWithUser.Type;
 
-export const InvitationWithOrganizationAndInviter = Invitation.extend({
-  organization: Organization,
-  inviter: User,
-});
-export type InvitationWithOrganizationAndInviter = z.infer<
-  typeof InvitationWithOrganizationAndInviter
->;
+export const InvitationWithOrganizationAndInviter = Invitation.pipe(
+  Schema.fieldsAssign({
+    organization: Organization,
+    inviter: User,
+  }),
+);
+export type InvitationWithOrganizationAndInviter = typeof InvitationWithOrganizationAndInviter.Type;
 
-export const SessionWithUser = Session.extend({
-  user: User,
-});
-export type SessionWithUser = z.infer<typeof SessionWithUser>;
+export const SessionWithUser = Session.pipe(
+  Schema.fieldsAssign({
+    user: User,
+  }),
+);
+export type SessionWithUser = typeof SessionWithUser.Type;

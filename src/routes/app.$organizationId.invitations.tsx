@@ -128,10 +128,7 @@ const inviteSchema = z.object({
     )
     .refine((emails) => emails.length >= 1, "At least one email is required")
     .refine((emails) => emails.length <= 10, "Maximum 10 emails allowed"),
-  role: Domain.MemberRole.extract(
-    ["member", "admin"],
-    "Role must be Member or Admin.",
-  ),
+  role: z.enum(Domain.AssignableMemberRoleValues),
 });
 
 /**

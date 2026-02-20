@@ -1,5 +1,5 @@
 import { invariant } from "@epic-web/invariant";
-import * as z from "zod";
+import * as Schema from "effect/Schema";
 import * as Domain from "@/lib/domain";
 
 /**
@@ -33,7 +33,7 @@ export function createRepository({
       .prepare(`select * from User where email = ?1`)
       .bind(email)
       .first();
-    return Domain.User.nullable().parse(result);
+    return Schema.decodeUnknownSync(Schema.NullOr(Domain.User))(result);
   };
 
   const getUsers = async ({
@@ -87,14 +87,16 @@ select json_object(
       typeof result?.data === "string",
       "Expected result.data to be a string",
     );
-    return z
-      .object({
-        users: Domain.User.array(),
-        count: z.number(),
-        limit: z.number(),
-        offset: z.number(),
-      })
-      .parse(JSON.parse(result.data));
+    return Schema.decodeUnknownSync(
+      Schema.fromJsonString(
+        Schema.Struct({
+          users: Schema.Array(Domain.User),
+          count: Schema.Number,
+          limit: Schema.Number,
+          offset: Schema.Number,
+        }),
+      ),
+    )(result.data);
   };
 
   const getAppDashboardData = async ({
@@ -162,13 +164,15 @@ select json_object(
       typeof result?.data === "string",
       "Expected result.data to be a string",
     );
-    return z
-      .object({
-        userInvitations: Domain.InvitationWithOrganizationAndInviter.array(),
-        memberCount: z.number(),
-        pendingInvitationCount: z.number(),
-      })
-      .parse(JSON.parse(result.data));
+    return Schema.decodeUnknownSync(
+      Schema.fromJsonString(
+        Schema.Struct({
+          userInvitations: Schema.Array(Domain.InvitationWithOrganizationAndInviter),
+          memberCount: Schema.Number,
+          pendingInvitationCount: Schema.Number,
+        }),
+      ),
+    )(result.data);
   };
 
   const getAdminDashboardData = async () => {
@@ -193,13 +197,15 @@ select json_object(
       typeof result?.data === "string",
       "Expected result.data to be a string",
     );
-    return z
-      .object({
-        customerCount: z.number(),
-        activeSubscriptionCount: z.number(),
-        trialingSubscriptionCount: z.number(),
-      })
-      .parse(JSON.parse(result.data));
+    return Schema.decodeUnknownSync(
+      Schema.fromJsonString(
+        Schema.Struct({
+          customerCount: Schema.Number,
+          activeSubscriptionCount: Schema.Number,
+          trialingSubscriptionCount: Schema.Number,
+        }),
+      ),
+    )(result.data);
   };
 
   const getCustomers = async ({
@@ -270,14 +276,16 @@ select json_object(
       typeof result?.data === "string",
       "Expected result.data to be a string",
     );
-    return z
-      .object({
-        customers: Domain.UserWithSubscription.array(),
-        count: z.number(),
-        limit: z.number(),
-        offset: z.number(),
-      })
-      .parse(JSON.parse(result.data));
+    return Schema.decodeUnknownSync(
+      Schema.fromJsonString(
+        Schema.Struct({
+          customers: Schema.Array(Domain.UserWithSubscription),
+          count: Schema.Number,
+          limit: Schema.Number,
+          offset: Schema.Number,
+        }),
+      ),
+    )(result.data);
   };
 
   const getSubscriptions = async ({
@@ -374,14 +382,16 @@ select json_object(
       typeof result?.data === "string",
       "Expected result.data to be a string",
     );
-    return z
-      .object({
-        subscriptions: Domain.SubscriptionWithUser.array(),
-        count: z.number(),
-        limit: z.number(),
-        offset: z.number(),
-      })
-      .parse(JSON.parse(result.data));
+    return Schema.decodeUnknownSync(
+      Schema.fromJsonString(
+        Schema.Struct({
+          subscriptions: Schema.Array(Domain.SubscriptionWithUser),
+          count: Schema.Number,
+          limit: Schema.Number,
+          offset: Schema.Number,
+        }),
+      ),
+    )(result.data);
   };
 
   const getSessions = async ({
@@ -474,14 +484,16 @@ select json_object(
       typeof result?.data === "string",
       "Expected result.data to be a string",
     );
-    return z
-      .object({
-        sessions: Domain.SessionWithUser.array(),
-        count: z.number(),
-        limit: z.number(),
-        offset: z.number(),
-      })
-      .parse(JSON.parse(result.data));
+    return Schema.decodeUnknownSync(
+      Schema.fromJsonString(
+        Schema.Struct({
+          sessions: Schema.Array(Domain.SessionWithUser),
+          count: Schema.Number,
+          limit: Schema.Number,
+          offset: Schema.Number,
+        }),
+      ),
+    )(result.data);
   };
 
   const updateInvitationRole = async ({

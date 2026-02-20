@@ -167,6 +167,7 @@ npm install -g @openai/codex
 ```
 https://www.pgrs.net/2025/06/17/double-entry-ledgers-missing-primitive-in-modern-software/
 https://dev.to/lerian/what-is-double-entry-and-how-to-use-it-on-a-financial-operation-1ae5
+https://www.balanced.software/
 
 ```
 

@@ -3,7 +3,8 @@ import type { Repository } from "@/lib/repository";
 import type { StripeService } from "@/lib/stripe-service";
 import serverEntry from "@tanstack/react-start/server-entry";
 import { getAgentByName, routeAgentRequest } from "agents";
-import * as z from "zod";
+import * as Exit from "effect/Exit";
+import * as Schema from "effect/Schema";
 import { createAuthService } from "@/lib/auth-service";
 import { createD1SessionService } from "@/lib/d1-session-service";
 import { createRepository } from "@/lib/repository";
@@ -15,6 +16,14 @@ export {
   OrganizationWorkflow,
   OrganizationImageClassificationWorkflow,
 } from "./organization-agent";
+
+const r2QueueMessageSchema = Schema.Struct({
+  action: Schema.NonEmptyString,
+  object: Schema.Struct({
+    key: Schema.NonEmptyString,
+  }),
+  eventTime: Schema.NonEmptyString,
+});
 
 export interface ServerContext {
   env: Env;
@@ -132,25 +141,19 @@ export default {
 
   async queue(batch, env) {
     for (const message of batch.messages) {
-      const parsed = z
-        .object({
-          action: z.string().min(1),
-          object: z.object({
-            key: z.string().min(1),
-          }),
-          eventTime: z.string().min(1),
-        })
-        .safeParse(message.body);
-      if (!parsed.success) {
+      const result = Schema.decodeUnknownExit(r2QueueMessageSchema)(
+        message.body,
+      );
+      if (Exit.isFailure(result)) {
         console.error("Invalid R2 queue message body", {
           messageId: message.id,
-          issues: parsed.error.issues,
+          cause: String(result.cause),
           body: message.body,
         });
         message.ack();
         continue;
       }
-      const notification = parsed.data;
+      const notification = result.value;
       if (
         notification.action !== "PutObject" &&
         notification.action !== "DeleteObject" &&

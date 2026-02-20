@@ -117,7 +117,7 @@ const updateMemberRole = createServerFn({ method: "POST" })
     z.object({
       organizationId: z.string(),
       memberId: z.string(),
-      role: Domain.MemberRole.exclude(["owner"]),
+      role: z.enum(Domain.AssignableMemberRoleValues),
     }),
   )
   .handler(

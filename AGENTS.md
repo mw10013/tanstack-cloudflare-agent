@@ -120,6 +120,9 @@ playwright-cli session-list
 playwright-cli session-delete "$(pnpm port)-localdev"
 ```
 
+- Use `u@u.com` to login as user.
+- Use synth images in public to upload.
+
 ## Do Not Edit
 
 The following are auto-generated or externally managed:

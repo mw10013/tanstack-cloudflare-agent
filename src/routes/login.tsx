@@ -43,11 +43,13 @@ export const login = createServerFn({
   .handler(async ({ data, context: { authService, env } }) => {
     const request = getRequest();
     const normalizedEmail = data.email.trim().toLowerCase();
-    const whitelist = env.EMAIL_WHITELIST.split(",")
-      .map((email) => email.trim().toLowerCase())
-      .filter(Boolean);
-    if (whitelist.length > 0 && !whitelist.includes(normalizedEmail)) {
-      throw new Error("Email not allowed. Please contact support.");
+    if (env.ENVIRONMENT !== "local") {
+      const whitelist = env.EMAIL_WHITELIST.split(",")
+        .map((email) => email.trim().toLowerCase())
+        .filter(Boolean);
+      if (whitelist.length > 0 && !whitelist.includes(normalizedEmail)) {
+        throw new Error("Email not allowed. Please contact support.");
+      }
     }
     const result = await authService.api.signInMagicLink({
       headers: request.headers,
