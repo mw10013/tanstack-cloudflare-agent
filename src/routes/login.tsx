@@ -3,8 +3,8 @@ import { useMutation } from "@tanstack/react-query";
 import { createFileRoute, useHydrated } from "@tanstack/react-router";
 import { createServerFn, useServerFn } from "@tanstack/react-start";
 import { getRequest } from "@tanstack/react-start/server";
+import * as Schema from "effect/Schema";
 import { AlertCircle } from "lucide-react";
-import { z } from "zod";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import {
@@ -32,14 +32,16 @@ const getLoaderData = createServerFn({ method: "GET" }).handler(
   ({ context: { env } }) => ({ isDemoMode: env.DEMO_MODE === "true" }),
 );
 
-const loginSchema = z.object({
-  email: z.email(),
+const loginSchema = Schema.Struct({
+  email: Schema.String.check(
+    Schema.isPattern(/^[^\s@]+@[^\s@]+\.[^\s@]+$/),
+  ),
 });
 
 export const login = createServerFn({
   method: "POST",
 })
-  .inputValidator(loginSchema)
+  .inputValidator(Schema.toStandardSchemaV1(loginSchema))
   .handler(async ({ data, context: { authService, env } }) => {
     const request = getRequest();
     const normalizedEmail = data.email.trim().toLowerCase();
@@ -72,14 +74,14 @@ function RouteComponent() {
   const isHydrated = useHydrated();
   const loginServerFn = useServerFn(login);
   const loginMutation = useMutation({
-    mutationFn: (data: z.input<typeof loginSchema>) => loginServerFn({ data }),
+    mutationFn: (data: typeof loginSchema.Type) => loginServerFn({ data }),
   });
   const form = useForm({
     defaultValues: {
       email: "",
     },
     validators: {
-      onSubmit: loginSchema,
+      onSubmit: Schema.toStandardSchemaV1(loginSchema),
     },
     onSubmit: ({ value }) => {
       console.log(`onSubmit: value: ${JSON.stringify(value)}`);

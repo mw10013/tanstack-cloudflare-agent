@@ -1,5 +1,5 @@
 import * as Oidc from "openid-client";
-import * as z from "zod";
+import * as Schema from "effect/Schema";
 
 export interface GoogleOAuthClientInput {
   clientId: string;
@@ -11,12 +11,12 @@ export interface GoogleAuthorizationInput extends GoogleOAuthClientInput {
   scope: readonly string[];
 }
 
-const GoogleTokenResponse = z.object({
-  access_token: z.string(),
-  expires_in: z.number(),
-  refresh_token: z.string().optional(),
-  scope: z.string().optional(),
-  id_token: z.string().optional(),
+const GoogleTokenResponse = Schema.Struct({
+  access_token: Schema.String,
+  expires_in: Schema.Number,
+  refresh_token: Schema.optionalKey(Schema.String),
+  scope: Schema.optionalKey(Schema.String),
+  id_token: Schema.optionalKey(Schema.String),
 });
 
 let cachedConfig: Oidc.Configuration | undefined;
@@ -80,7 +80,7 @@ export const exchangeGoogleAuthorizationCode = async (
     },
     { redirect_uri: input.redirectUri },
   );
-  return GoogleTokenResponse.parse(tokenResponse);
+  return Schema.decodeUnknownSync(GoogleTokenResponse)(tokenResponse);
 };
 
 export const refreshGoogleToken = async (
@@ -88,5 +88,5 @@ export const refreshGoogleToken = async (
 ) => {
   const config = await getGoogleOidcConfig(input);
   const tokenResponse = await Oidc.refreshTokenGrant(config, input.refreshToken);
-  return GoogleTokenResponse.parse(tokenResponse);
+  return Schema.decodeUnknownSync(GoogleTokenResponse)(tokenResponse);
 };

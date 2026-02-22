@@ -304,3 +304,45 @@ Applied in repo:
 
 - `src/routes/app.$organizationId.workflow.tsx`
 - `src/routes/app.$organizationId.upload.tsx`
+
+## Applied Migration Patterns (Current Repo State)
+
+The current migration ended up using four repeatable patterns:
+
+1. Standard Schema for TanStack Start/Router/TanStack Form hooks
+- `Schema.toStandardSchemaV1(schema)` for:
+  - `createServerFn(...).inputValidator(...)`
+  - `createFileRoute(...).validateSearch`
+  - `useForm({ validators: { onSubmit: ... } })`
+- Examples:
+  - `src/routes/login.tsx`
+  - `src/routes/app.$organizationId.members.tsx`
+  - `src/routes/app.$organizationId.billing.tsx`
+  - `src/routes/app.$organizationId.google.tsx`
+
+2. Search param coercion + defaults directly in Effect schema
+- For prior `z.coerce.number().int().min(1).default(1)` behavior:
+  - use union for number-or-string parse (`Schema.Int` + `Schema.NumberFromString`)
+  - apply range/int checks
+  - apply key-missing default via `Schema.withDecodingDefaultKey(() => 1)`
+  - pass `Schema.toStandardSchemaV1(searchSchema)` directly to `validateSearch` / `inputValidator`
+- Examples:
+  - `src/routes/admin.users.tsx`
+  - `src/routes/admin.sessions.tsx`
+  - `src/routes/admin.customers.tsx`
+  - `src/routes/admin.subscriptions.tsx`
+
+3. Complex form-to-server shape split
+- Keep a form-facing schema (`emails: string`) and a server-facing schema (`emails: string[]`) when UI input shape differs from API shape.
+- Convert in `onSubmit` before mutation.
+- Example:
+  - `src/routes/app.$organizationId.invitations.tsx`
+
+4. File validation without Zod
+- Use `Schema.File` + size checks + custom MIME predicate:
+  - `Schema.isMinSize(...)`
+  - `Schema.isMaxSize(...)`
+  - `Schema.makeFilter(...)`
+- Decode `FormData` payload with `Schema.decodeUnknownSync(...)` on `Object.fromEntries(...)`.
+- Example:
+  - `src/routes/app.$organizationId.upload.tsx`

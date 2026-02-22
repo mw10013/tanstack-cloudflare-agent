@@ -5,7 +5,7 @@ This doc explains the `pageSchema` in `src/routes/admin.customers.tsx:30`:
 ```ts
 const pageSchema = Schema.Union([
   Schema.Int,
-  Schema.NumberFromString.pipe(Schema.check(Schema.isInt())),
+  Schema.NumberFromString.check(Schema.isInt()),
 ])
   .check(Schema.isGreaterThanOrEqualTo(1))
   .pipe(Schema.withDecodingDefaultKey(() => 1));
@@ -25,7 +25,13 @@ const s2 = Schema.check(Schema.isInt())(s1);
 Same as:
 
 ```ts
-const s2 = Schema.NumberFromString.pipe(Schema.check(Schema.isInt()));
+const s2 = s1.pipe(Schema.check(Schema.isInt()));
+```
+
+Recommended style in this codebase:
+
+```ts
+const s2 = s1.check(Schema.isInt());
 ```
 
 Grounding:
@@ -37,7 +43,7 @@ Grounding:
 Expression:
 
 ```ts
-Schema.NumberFromString.pipe(Schema.check(Schema.isInt()));
+Schema.NumberFromString.check(Schema.isInt());
 ```
 
 ### Step flow
@@ -69,18 +75,82 @@ Examples:
 - `"abc"` -> fail (`NumberFromString`)
 - `2` -> fail (expects string on this branch)
 
-Why is pipe needed? Why does this not suffice:
+## Why `pipe` here? Why not `schema.check(...)` directly?
 
+This also works:
+
+```ts
+Schema.NumberFromString.check(Schema.isInt());
 ```
-Schema.NumberFromString.check(Schema.isInt())
+
+`pipe` is not required for correctness here.
+
+Both are equivalent in result:
+
+- method style: `schema.check(...)`
+- function-composition style: `schema.pipe(Schema.check(...))`
+
+Why use `pipe` anyway:
+
+- consistent left-to-right composition when mixing method-style and function-style helpers
+- same shape as other transforms like `Schema.withDecodingDefaultKey(...)` that are commonly used via `pipe`
+
+## Should we prefer `pipe` here? (idiomatic guidance)
+
+Short answer: not a strong rule. For `check`, both are idiomatic.
+
+Evidence from Effect source/tests:
+
+- method style is common:
+  - `Int = Number.check(isInt())` (`refs/effect4/packages/effect/src/Schema.ts:7032`)
+  - `NonEmptyString = String.check(isNonEmpty())` (`refs/effect4/packages/effect/src/Schema.ts:5243`)
+- function+pipe style is also used:
+  - `Schema.String.pipe(Schema.check(...))` examples in docs/tests (`refs/effect4/packages/effect/SCHEMA.md:7977`, `refs/effect4/packages/effect/test/schema/toArbitrary.test.ts:435`)
+
+For some helpers, `pipe` is effectively required/expected:
+
+- `decodeTo` docs explicitly say curried and "must use pipe" (`refs/effect4/packages/effect/src/Schema.ts:2846`)
+- `withDecodingDefaultKey` is a curried function returning `(self) => ...` (`refs/effect4/packages/effect/src/Schema.ts:3059`)
+
+Practical recommendation:
+
+- use method style (`schema.check(...)`) for a quick single check
+- use `pipe(...)` for curried transformers (`decodeTo`, `withDecodingDefaultKey`, etc.)
+- keep style consistent within a local expression; consistency > rule purity
+
+## Recommended approach for this codebase
+
+Use method style for local checks, `pipe` for curried transformers.
+
+Recommended rewrite of the first branch:
+
+```ts
+Schema.NumberFromString.check(Schema.isInt());
 ```
+
+So full `pageSchema` can read as:
+
+```ts
+const pageSchema = Schema.Union([
+  Schema.Int,
+  Schema.NumberFromString.check(Schema.isInt()),
+])
+  .check(Schema.isGreaterThanOrEqualTo(1))
+  .pipe(Schema.withDecodingDefaultKey(() => 1));
+```
+
+Why this is the best compromise:
+
+- fewer cognitive jumps for readers new to `pipe`
+- still uses `pipe` where it is naturally curried (`withDecodingDefaultKey`)
+- aligns with common Effect method-style check usage (`refs/effect4/packages/effect/src/Schema.ts:7032`, `refs/effect4/packages/effect/src/Schema.ts:5243`)
 
 ## Now full `pageSchema`
 
 ```ts
 const pageSchema = Schema.Union([
   Schema.Int,
-  Schema.NumberFromString.pipe(Schema.check(Schema.isInt())),
+  Schema.NumberFromString.check(Schema.isInt()),
 ])
   .check(Schema.isGreaterThanOrEqualTo(1))
   .pipe(Schema.withDecodingDefaultKey(() => 1));
@@ -90,7 +160,7 @@ const pageSchema = Schema.Union([
 
 ```ts
 const branchA = Schema.Int;
-const branchB = Schema.NumberFromString.pipe(Schema.check(Schema.isInt()));
+const branchB = Schema.NumberFromString.check(Schema.isInt());
 const union = Schema.Union([branchA, branchB]);
 const constrained = union.check(Schema.isGreaterThanOrEqualTo(1));
 const pageSchema = constrained.pipe(Schema.withDecodingDefaultKey(() => 1));

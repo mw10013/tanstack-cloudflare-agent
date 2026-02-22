@@ -11,7 +11,6 @@ import { useAgent } from "agents/react";
 import * as Exit from "effect/Exit";
 import * as Schema from "effect/Schema";
 import { AlertCircle, Check, Play, X } from "lucide-react";
-import * as z from "zod";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -40,9 +39,9 @@ const getLoaderData = createServerFn({ method: "GET" })
     return { requests: await stub.listApprovalRequests() };
   });
 
-const requestApprovalSchema = z.object({
-  title: z.string().trim().min(1, "Title is required"),
-  description: z.string().trim(),
+const requestApprovalSchema = Schema.Struct({
+  title: Schema.Trim.check(Schema.isMinLength(1)),
+  description: Schema.Trim,
 });
 
 export const Route = createFileRoute("/app/$organizationId/workflow")({
@@ -97,7 +96,7 @@ function RouteComponent() {
     mutationFn: ({
       title,
       description,
-    }: z.input<typeof requestApprovalSchema>) =>
+    }: typeof requestApprovalSchema.Type) =>
       agent.stub.requestApproval(title, description),
     onSuccess: () => {
       form.reset();
@@ -125,7 +124,7 @@ function RouteComponent() {
       description: "",
     },
     validators: {
-      onSubmit: requestApprovalSchema,
+      onSubmit: Schema.toStandardSchemaV1(requestApprovalSchema),
     },
     onSubmit: ({ value }) => {
       requestMutation.mutate(value);

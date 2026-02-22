@@ -1,51 +1,62 @@
-import * as z from "zod";
+import * as Exit from "effect/Exit";
+import * as Schema from "effect/Schema";
 
-const GoogleApiError = z.object({
-  error: z.object({
-    code: z.number(),
-    message: z.string(),
-    status: z.string().optional(),
+const GoogleApiError = Schema.Struct({
+  error: Schema.Struct({
+    code: Schema.Number,
+    message: Schema.String,
+    status: Schema.optionalKey(Schema.String),
   }),
 });
 
-const DriveListResponse = z.object({
-  files: z.array(z.object({
-    id: z.string(),
-    name: z.string(),
-    modifiedTime: z.string().optional(),
-    webViewLink: z.string().optional(),
-  })).optional(),
+const DriveListResponse = Schema.Struct({
+  files: Schema.optionalKey(
+    Schema.Array(
+      Schema.Struct({
+        id: Schema.String,
+        name: Schema.String,
+        modifiedTime: Schema.optionalKey(Schema.String),
+        webViewLink: Schema.optionalKey(Schema.String),
+      }),
+    ),
+  ),
 });
 
-const SheetsValuesResponse = z.object({
-  range: z.string().optional(),
-  majorDimension: z.string().optional(),
-  values: z.array(z.array(z.unknown())).optional(),
-}).loose();
+const SheetsValuesResponse = Schema.Struct({
+  range: Schema.optionalKey(Schema.String),
+  majorDimension: Schema.optionalKey(Schema.String),
+  values: Schema.optionalKey(Schema.Array(Schema.Array(Schema.Unknown))),
+});
 
-const SheetsAppendResponse = z.object({
-  spreadsheetId: z.string().optional(),
-  tableRange: z.string().optional(),
-  updates: z.object({
-    spreadsheetId: z.string().optional(),
-    updatedRange: z.string().optional(),
-    updatedRows: z.number().optional(),
-    updatedColumns: z.number().optional(),
-    updatedCells: z.number().optional(),
-  }).optional(),
-}).loose();
+const SheetsAppendResponse = Schema.Struct({
+  spreadsheetId: Schema.optionalKey(Schema.String),
+  tableRange: Schema.optionalKey(Schema.String),
+  updates: Schema.optionalKey(
+    Schema.Struct({
+      spreadsheetId: Schema.optionalKey(Schema.String),
+      updatedRange: Schema.optionalKey(Schema.String),
+      updatedRows: Schema.optionalKey(Schema.Number),
+      updatedColumns: Schema.optionalKey(Schema.Number),
+      updatedCells: Schema.optionalKey(Schema.Number),
+    }),
+  ),
+});
 
-interface GoogleRequestInput<T> {
+interface GoogleRequestInput<
+  S extends Schema.Top & { readonly DecodingServices: never },
+> {
   url: URL | string;
   accessToken: string;
   method?: "GET" | "POST";
   body?: string;
-  schema: z.ZodType<T>;
+  schema: S;
 }
 
-const fetchGoogle = async <T>(
-  { url, accessToken, method = "GET", body, schema }: GoogleRequestInput<T>,
-) => {
+const fetchGoogle = async <
+  S extends Schema.Top & { readonly DecodingServices: never },
+>(
+  { url, accessToken, method = "GET", body, schema }: GoogleRequestInput<S>,
+): Promise<S["Type"]> => {
   const response = await fetch(url, {
     method,
     headers: {
@@ -56,14 +67,14 @@ const fetchGoogle = async <T>(
   });
   if (!response.ok) {
     const json = await response.json().catch(() => null);
-    const parsed = GoogleApiError.safeParse(json);
+    const parsed = Schema.decodeUnknownExit(GoogleApiError)(json);
     throw new Error(
-      parsed.success
-        ? `Google API ${String(parsed.data.error.code)}: ${parsed.data.error.message}`
+      Exit.isSuccess(parsed)
+        ? `Google API ${String(parsed.value.error.code)}: ${parsed.value.error.message}`
         : `Google API request failed: ${String(response.status)}`,
     );
   }
-  return schema.parse(await response.json());
+  return Schema.decodeUnknownSync(schema)(await response.json());
 };
 
 export const listDriveSpreadsheetsRequest = (

@@ -1,8 +1,8 @@
 import * as React from "react";
 import { createFileRoute, redirect, useRouter } from "@tanstack/react-router";
 import { createServerFn } from "@tanstack/react-start";
+import * as Schema from "effect/Schema";
 import { ChevronLeftIcon, ChevronRightIcon, Search } from "lucide-react";
-import { z } from "zod";
 import {
   InputGroup,
   InputGroupAddon,
@@ -27,13 +27,18 @@ import {
 
 const LIMIT = 20;
 
-const subscriptionSearchSchema = z.object({
-  page: z.coerce.number().int().min(1).default(1),
-  filter: z.string().trim().optional(),
+const subscriptionSearchSchema = Schema.Struct({
+  page: Schema.Union([
+    Schema.Int,
+    Schema.NumberFromString.check(Schema.isInt()),
+  ]).check(Schema.isGreaterThanOrEqualTo(1)).pipe(
+    Schema.withDecodingDefaultKey(() => 1),
+  ),
+  filter: Schema.optionalKey(Schema.Trim),
 });
 
 export const getSubscriptions = createServerFn({ method: "GET" })
-  .inputValidator(subscriptionSearchSchema)
+  .inputValidator(Schema.toStandardSchemaV1(subscriptionSearchSchema))
   .handler(async ({ data, context: { repository } }) => {
     const { page, filter } = data;
     const offset = (page - 1) * LIMIT;
@@ -52,7 +57,7 @@ export const getSubscriptions = createServerFn({ method: "GET" })
   });
 
 export const Route = createFileRoute("/admin/subscriptions")({
-  validateSearch: subscriptionSearchSchema,
+  validateSearch: Schema.toStandardSchemaV1(subscriptionSearchSchema),
   loaderDeps: ({ search }) => ({ page: search.page, filter: search.filter }),
   loader: async ({ deps }) => {
     const result = await getSubscriptions({ data: deps });

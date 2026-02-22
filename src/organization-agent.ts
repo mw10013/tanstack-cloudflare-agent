@@ -10,8 +10,8 @@ import { callable } from "agents";
 import { AgentWorkflow } from "agents/workflows";
 import { convertToModelMessages, generateText, streamText } from "ai";
 import { createOpenAI } from "ai-gateway-provider/providers/openai";
+import * as Schema from "effect/Schema";
 import { createWorkersAI } from "workers-ai-provider";
-import * as z from "zod";
 import {
   appendSpreadsheetValuesRequest,
   getSpreadsheetValuesRequest,
@@ -20,107 +20,125 @@ import {
 import { refreshGoogleToken } from "@/lib/google-oauth-client";
 import { type OrganizationMessage } from "@/organization-messages";
 
-const AgentState = z.object({
-  id: z.string(),
-  state: z.string(),
+const AgentState = Schema.Struct({
+  id: Schema.String,
+  state: Schema.String,
 });
-export type AgentState = z.infer<typeof AgentState>;
+export type AgentState = typeof AgentState.Type;
 
-const AgentQueue = z.object({
-  id: z.string(),
-  payload: z.string().nullable(),
-  callback: z.string().nullable(),
-  created_at: z.number().nullable(),
+const AgentQueue = Schema.Struct({
+  id: Schema.String,
+  payload: Schema.NullOr(Schema.String),
+  callback: Schema.NullOr(Schema.String),
+  created_at: Schema.NullOr(Schema.Number),
 });
-export type AgentQueue = z.infer<typeof AgentQueue>;
+export type AgentQueue = typeof AgentQueue.Type;
 
-const AgentSchedule = z.object({
-  id: z.string(),
-  callback: z.string().nullable(),
-  payload: z.string().nullable(),
-  type: z.enum(["scheduled", "delayed", "cron", "interval"]),
-  time: z.number().nullable(),
-  delayInSeconds: z.number().nullable(),
-  cron: z.string().nullable(),
-  intervalSeconds: z.number().nullable(),
-  running: z.number().nullable(),
-  created_at: z.number().nullable(),
-  execution_started_at: z.number().nullable(),
+const AgentSchedule = Schema.Struct({
+  id: Schema.String,
+  callback: Schema.NullOr(Schema.String),
+  payload: Schema.NullOr(Schema.String),
+  type: Schema.Literals(["scheduled", "delayed", "cron", "interval"]),
+  time: Schema.NullOr(Schema.Number),
+  delayInSeconds: Schema.NullOr(Schema.Number),
+  cron: Schema.NullOr(Schema.String),
+  intervalSeconds: Schema.NullOr(Schema.Number),
+  running: Schema.NullOr(Schema.Number),
+  created_at: Schema.NullOr(Schema.Number),
+  execution_started_at: Schema.NullOr(Schema.Number),
 });
-export type AgentSchedule = z.infer<typeof AgentSchedule>;
+export type AgentSchedule = typeof AgentSchedule.Type;
 
-const AgentWorkflowRow = z.object({
-  id: z.string(),
-  workflow_id: z.string(),
-  workflow_name: z.string(),
-  status: z.string(),
-  metadata: z.string().nullable(),
-  error_name: z.string().nullable(),
-  error_message: z.string().nullable(),
-  created_at: z.number(),
-  updated_at: z.number(),
-  completed_at: z.number().nullable(),
+const AgentWorkflowRow = Schema.Struct({
+  id: Schema.String,
+  workflow_id: Schema.String,
+  workflow_name: Schema.String,
+  status: Schema.String,
+  metadata: Schema.NullOr(Schema.String),
+  error_name: Schema.NullOr(Schema.String),
+  error_message: Schema.NullOr(Schema.String),
+  created_at: Schema.Number,
+  updated_at: Schema.Number,
+  completed_at: Schema.NullOr(Schema.Number),
 });
-export type AgentWorkflowRow = z.infer<typeof AgentWorkflowRow>;
+export type AgentWorkflowRow = typeof AgentWorkflowRow.Type;
 
-const ChatMessage = z.object({
-  id: z.string(),
-  message: z.string(),
-  created_at: z.string(),
+const ChatMessage = Schema.Struct({
+  id: Schema.String,
+  message: Schema.String,
+  created_at: Schema.String,
 });
-export type ChatMessage = z.infer<typeof ChatMessage>;
+export type ChatMessage = typeof ChatMessage.Type;
 
-const ChatStreamChunk = z.object({
-  id: z.string(),
-  stream_id: z.string(),
-  body: z.string(),
-  chunk_index: z.number(),
-  created_at: z.number(),
+const ChatStreamChunk = Schema.Struct({
+  id: Schema.String,
+  stream_id: Schema.String,
+  body: Schema.String,
+  chunk_index: Schema.Number,
+  created_at: Schema.Number,
 });
-export type ChatStreamChunk = z.infer<typeof ChatStreamChunk>;
+export type ChatStreamChunk = typeof ChatStreamChunk.Type;
 
-const ChatStreamMetadata = z.object({
-  id: z.string(),
-  request_id: z.string(),
-  status: z.string(),
-  created_at: z.number(),
-  completed_at: z.number().nullable(),
+const ChatStreamMetadata = Schema.Struct({
+  id: Schema.String,
+  request_id: Schema.String,
+  status: Schema.String,
+  created_at: Schema.Number,
+  completed_at: Schema.NullOr(Schema.Number),
 });
-export type ChatStreamMetadata = z.infer<typeof ChatStreamMetadata>;
+export type ChatStreamMetadata = typeof ChatStreamMetadata.Type;
 
-const UploadRow = z.object({
-  name: z.string(),
-  createdAt: z.number(),
-  eventTime: z.number(),
-  idempotencyKey: z.string(),
-  classificationLabel: z.string().nullable(),
-  classificationScore: z.number().nullable(),
-  classifiedAt: z.number().nullable(),
+const UploadRow = Schema.Struct({
+  name: Schema.String,
+  createdAt: Schema.Number,
+  eventTime: Schema.Number,
+  idempotencyKey: Schema.String,
+  classificationLabel: Schema.NullOr(Schema.String),
+  classificationScore: Schema.NullOr(Schema.Number),
+  classifiedAt: Schema.NullOr(Schema.Number),
 });
-export type UploadRow = z.infer<typeof UploadRow>;
+export type UploadRow = typeof UploadRow.Type;
 
-const GoogleConnectionRow = z.object({
-  id: z.number(),
-  provider: z.string(),
-  googleUserEmail: z.string().nullable(),
-  scopes: z.string(),
-  accessToken: z.string().nullable(),
-  accessTokenExpiresAt: z.number().nullable(),
-  refreshToken: z.string().nullable(),
-  idToken: z.string().nullable(),
-  createdAt: z.number(),
-  updatedAt: z.number(),
+const GoogleConnectionRow = Schema.Struct({
+  id: Schema.Number,
+  provider: Schema.String,
+  googleUserEmail: Schema.NullOr(Schema.String),
+  scopes: Schema.String,
+  accessToken: Schema.NullOr(Schema.String),
+  accessTokenExpiresAt: Schema.NullOr(Schema.Number),
+  refreshToken: Schema.NullOr(Schema.String),
+  idToken: Schema.NullOr(Schema.String),
+  createdAt: Schema.Number,
+  updatedAt: Schema.Number,
 });
-type GoogleConnectionRow = z.infer<typeof GoogleConnectionRow>;
+type GoogleConnectionRow = typeof GoogleConnectionRow.Type;
 
-const GoogleSpreadsheetCacheRow = z.object({
-  spreadsheetId: z.string(),
-  name: z.string(),
-  modifiedTime: z.string().nullable(),
-  webViewLink: z.string().nullable(),
-  lastSeenAt: z.number(),
+const GoogleSpreadsheetCacheRow = Schema.Struct({
+  spreadsheetId: Schema.String,
+  name: Schema.String,
+  modifiedTime: Schema.NullOr(Schema.String),
+  webViewLink: Schema.NullOr(Schema.String),
+  lastSeenAt: Schema.Number,
 });
-type GoogleSpreadsheetCacheRow = z.infer<typeof GoogleSpreadsheetCacheRow>;
+type GoogleSpreadsheetCacheRow = typeof GoogleSpreadsheetCacheRow.Type;
+
+const ResnetPredictions = Schema.Array(
+  Schema.Struct({
+    label: Schema.String,
+    score: Schema.Number,
+  }),
+).check(Schema.isMinLength(1));
+
+const ApprovalProgress = Schema.Struct({
+  status: Schema.Literals(["pending", "approved", "rejected"]),
+  message: Schema.String,
+});
+
+const ApprovalResult = Schema.UndefinedOr(
+  Schema.Struct({
+    approved: Schema.Boolean,
+  }),
+);
 
 const activeWorkflowStatuses = new Set([
   "queued",
@@ -246,7 +264,7 @@ export class OrganizationImageClassificationWorkflow extends AgentWorkflow<
           },
         },
       );
-      const predictions = z.array(z.object({ label: z.string(), score: z.number() })).min(1).parse(response);
+      const predictions = Schema.decodeUnknownSync(ResnetPredictions)(response);
       const first = predictions[0];
       return first;
     });
@@ -349,7 +367,7 @@ export class OrganizationAgent extends AIChatAgent<Env> {
     if (!Number.isFinite(eventTime)) {
       throw new Error(`Invalid eventTime: ${upload.eventTime}`);
     }
-    const existing = UploadRow.nullable().parse(this
+    const existing = Schema.decodeUnknownSync(Schema.NullOr(UploadRow))(this
       .sql<UploadRow>`select * from Upload where name = ${upload.name}`[0] ?? null);
     if (existing && eventTime < existing.eventTime) {
       console.log("classification workflow skipped for stale upload event", {
@@ -429,7 +447,7 @@ export class OrganizationAgent extends AIChatAgent<Env> {
     if (!Number.isFinite(eventTime)) {
       throw new Error(`Invalid eventTime: ${input.eventTime}`);
     }
-    const existing = UploadRow.nullable().parse(this
+    const existing = Schema.decodeUnknownSync(Schema.NullOr(UploadRow))(this
       .sql<UploadRow>`select * from Upload where name = ${input.name}`[0] ?? null);
     if (!existing || eventTime < existing.eventTime) {
       return;
@@ -492,7 +510,7 @@ export class OrganizationAgent extends AIChatAgent<Env> {
 
   @callable()
   getUploads() {
-    return UploadRow.array().parse(
+    return Schema.decodeUnknownSync(Schema.Array(UploadRow))(
       this.sql`select * from Upload order by createdAt desc`,
     );
   }
@@ -568,7 +586,7 @@ export class OrganizationAgent extends AIChatAgent<Env> {
 
   @callable()
   getGoogleConnectionStatus() {
-    const row = GoogleConnectionRow.nullable().parse(this.sql<GoogleConnectionRow>`
+    const row = Schema.decodeUnknownSync(Schema.NullOr(GoogleConnectionRow))(this.sql<GoogleConnectionRow>`
       select * from GoogleConnection where id = 1
     `[0] ?? null);
     return {
@@ -589,9 +607,9 @@ export class OrganizationAgent extends AIChatAgent<Env> {
 
   @callable()
   getCachedDriveSpreadsheets() {
-    return GoogleSpreadsheetCacheRow.array().parse(this.sql<GoogleSpreadsheetCacheRow>`
+    return Schema.decodeUnknownSync(Schema.Array(GoogleSpreadsheetCacheRow))(this.sql<GoogleSpreadsheetCacheRow>`
       select * from GoogleSpreadsheetCache order by name asc
-    `);
+    `).map((row) => ({ ...row }));
   }
 
   @callable()
@@ -680,7 +698,7 @@ export class OrganizationAgent extends AIChatAgent<Env> {
 
   getAgentState() {
     const rows = this.sql`select * from cf_agents_state`;
-    return AgentState.array().parse(
+    return Schema.decodeUnknownSync(Schema.Array(AgentState))(
       rows.map((r) => ({
         ...r,
         state: typeof r.state === "string" ? r.state : JSON.stringify(r.state),
@@ -689,19 +707,19 @@ export class OrganizationAgent extends AIChatAgent<Env> {
   }
 
   getAgentQueues() {
-    return AgentQueue.array().parse(
+    return Schema.decodeUnknownSync(Schema.Array(AgentQueue))(
       this.sql`select * from cf_agents_queues order by created_at`,
     );
   }
 
   getAgentSchedules() {
-    return AgentSchedule.array().parse(
+    return Schema.decodeUnknownSync(Schema.Array(AgentSchedule))(
       this.sql`select * from cf_agents_schedules order by created_at`,
     );
   }
 
   getAgentWorkflows() {
-    return AgentWorkflowRow.array().parse(
+    return Schema.decodeUnknownSync(Schema.Array(AgentWorkflowRow))(
       this.sql`select * from cf_agents_workflows order by created_at`,
     );
   }
@@ -709,7 +727,7 @@ export class OrganizationAgent extends AIChatAgent<Env> {
   getChatMessages() {
     const rows = this
       .sql`select * from cf_ai_chat_agent_messages order by created_at`;
-    return ChatMessage.array().parse(
+    return Schema.decodeUnknownSync(Schema.Array(ChatMessage))(
       rows.map((r) => ({
         ...r,
         message:
@@ -719,14 +737,14 @@ export class OrganizationAgent extends AIChatAgent<Env> {
   }
 
   getChatStreamChunks() {
-    return ChatStreamChunk.array().parse(
+    return Schema.decodeUnknownSync(Schema.Array(ChatStreamChunk))(
       this
         .sql`select * from cf_ai_chat_stream_chunks order by stream_id, chunk_index`,
     );
   }
 
   getChatStreamMetadata() {
-    return ChatStreamMetadata.array().parse(
+    return Schema.decodeUnknownSync(Schema.Array(ChatStreamMetadata))(
       this.sql`select * from cf_ai_chat_stream_metadata order by created_at`,
     );
   }
@@ -781,10 +799,7 @@ export class OrganizationAgent extends AIChatAgent<Env> {
     if (workflowName !== "OrganizationWorkflow") {
       return;
     }
-    const approvalProgress = z.object({
-      status: z.enum(["pending", "approved", "rejected"]),
-      message: z.string(),
-    }).parse(progress);
+    const approvalProgress = Schema.decodeUnknownSync(ApprovalProgress)(progress);
     this.broadcastMessage({ type: "workflow_progress", workflowId, progress: approvalProgress });
   }
 
@@ -797,7 +812,7 @@ export class OrganizationAgent extends AIChatAgent<Env> {
     if (workflowName !== "OrganizationWorkflow") {
       return;
     }
-    const approvalResult = z.object({ approved: z.boolean() }).optional().parse(result);
+    const approvalResult = Schema.decodeUnknownSync(ApprovalResult)(result);
     this.broadcastMessage({ type: "workflow_complete", workflowId, result: approvalResult });
   }
 
@@ -814,7 +829,7 @@ export class OrganizationAgent extends AIChatAgent<Env> {
     if (workflowName !== "OrganizationImageClassificationWorkflow") {
       return;
     }
-    const row = UploadRow.nullable().parse(this
+    const row = Schema.decodeUnknownSync(Schema.NullOr(UploadRow))(this
       .sql<UploadRow>`select * from Upload where idempotencyKey = ${workflowId}`[0] ?? null);
     if (row?.idempotencyKey !== workflowId) {
       return;
@@ -951,7 +966,7 @@ export class OrganizationAgent extends AIChatAgent<Env> {
   }
 
   private getGoogleConnectionRow() {
-    return GoogleConnectionRow.nullable().parse(this.sql<GoogleConnectionRow>`
+    return Schema.decodeUnknownSync(Schema.NullOr(GoogleConnectionRow))(this.sql<GoogleConnectionRow>`
       select * from GoogleConnection where id = 1
     `[0] ?? null);
   }

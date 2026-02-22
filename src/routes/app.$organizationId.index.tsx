@@ -7,7 +7,7 @@ import {
 } from "@tanstack/react-router";
 import { createServerFn, useServerFn } from "@tanstack/react-start";
 import { getRequest } from "@tanstack/react-start/server";
-import * as z from "zod";
+import * as Schema from "effect/Schema";
 import { Button } from "@/components/ui/button";
 import {
   Card,
@@ -24,9 +24,9 @@ import {
   ItemTitle,
 } from "@/components/ui/item";
 
-const organizationIdSchema = z.object({ organizationId: z.string() });
+const organizationIdSchema = Schema.Struct({ organizationId: Schema.String });
 
-const invitationIdSchema = z.object({ invitationId: z.string() });
+const invitationIdSchema = Schema.Struct({ invitationId: Schema.String });
 
 export const Route = createFileRoute("/app/$organizationId/")({
   loader: ({ params: data }) => getLoaderData({ data }),
@@ -34,7 +34,7 @@ export const Route = createFileRoute("/app/$organizationId/")({
 });
 
 const getLoaderData = createServerFn({ method: "GET" })
-  .inputValidator(organizationIdSchema)
+  .inputValidator(Schema.toStandardSchemaV1(organizationIdSchema))
   .handler(
     async ({
       data: { organizationId },
@@ -54,7 +54,7 @@ const getLoaderData = createServerFn({ method: "GET" })
   );
 
 const acceptInvitation = createServerFn({ method: "POST" })
-  .inputValidator(invitationIdSchema)
+  .inputValidator(Schema.toStandardSchemaV1(invitationIdSchema))
   .handler(async ({ data: { invitationId }, context: { authService } }) => {
     const request = getRequest();
     await authService.api.acceptInvitation({
@@ -64,7 +64,7 @@ const acceptInvitation = createServerFn({ method: "POST" })
   });
 
 const rejectInvitation = createServerFn({ method: "POST" })
-  .inputValidator(invitationIdSchema)
+  .inputValidator(Schema.toStandardSchemaV1(invitationIdSchema))
   .handler(async ({ data: { invitationId }, context: { authService } }) => {
     const request = getRequest();
     await authService.api.rejectInvitation({

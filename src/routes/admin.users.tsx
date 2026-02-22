@@ -9,13 +9,13 @@ import {
 } from "@tanstack/react-router";
 import { createServerFn, useServerFn } from "@tanstack/react-start";
 import { getRequest } from "@tanstack/react-start/server";
+import * as Schema from "effect/Schema";
 import {
   AlertCircle,
   ChevronLeftIcon,
   ChevronRightIcon,
   Search,
 } from "lucide-react";
-import { z } from "zod";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import {
@@ -63,15 +63,20 @@ import {
 
 const LIMIT = 5;
 
-const userSearchSchema = z.object({
-  page: z.coerce.number().int().min(1).default(1),
-  filter: z.string().trim().optional(),
+const userSearchSchema = Schema.Struct({
+  page: Schema.Union([
+    Schema.Int,
+    Schema.NumberFromString.check(Schema.isInt()),
+  ]).check(Schema.isGreaterThanOrEqualTo(1)).pipe(
+    Schema.withDecodingDefaultKey(() => 1),
+  ),
+  filter: Schema.optionalKey(Schema.Trim),
 });
 
-const userIdSchema = z.object({ userId: z.string() });
+const userIdSchema = Schema.Struct({ userId: Schema.String });
 
 export const getUsers = createServerFn({ method: "GET" })
-  .inputValidator(userSearchSchema)
+  .inputValidator(Schema.toStandardSchemaV1(userSearchSchema))
   .handler(async ({ data, context: { repository } }) => {
     const { page, filter } = data;
     const offset = (page - 1) * LIMIT;
@@ -90,7 +95,7 @@ export const getUsers = createServerFn({ method: "GET" })
   });
 
 export const Route = createFileRoute("/admin/users")({
-  validateSearch: userSearchSchema,
+  validateSearch: Schema.toStandardSchemaV1(userSearchSchema),
   loaderDeps: ({ search }) => ({ page: search.page, filter: search.filter }),
   loader: async ({ deps }) => {
     const result = await getUsers({ data: deps });
@@ -107,7 +112,7 @@ export const Route = createFileRoute("/admin/users")({
 });
 
 export const unbanUser = createServerFn({ method: "POST" })
-  .inputValidator(userIdSchema)
+  .inputValidator(Schema.toStandardSchemaV1(userIdSchema))
   .handler(async ({ data, context: { authService } }) => {
     const request = getRequest();
     await authService.api.unbanUser({
@@ -118,7 +123,7 @@ export const unbanUser = createServerFn({ method: "POST" })
   });
 
 export const impersonateUser = createServerFn({ method: "POST" })
-  .inputValidator(userIdSchema)
+  .inputValidator(Schema.toStandardSchemaV1(userIdSchema))
   .handler(async ({ data, context: { authService } }) => {
     const request = getRequest();
     await authService.api.impersonateUser({
@@ -339,13 +344,13 @@ function RouteComponent() {
   );
 }
 
-const banUserSchema = z.object({
-  userId: z.string(),
-  banReason: z.string().max(100),
+const banUserSchema = Schema.Struct({
+  userId: Schema.String,
+  banReason: Schema.String.check(Schema.isMaxLength(100)),
 });
 
 export const banUser = createServerFn({ method: "POST" })
-  .inputValidator(banUserSchema)
+  .inputValidator(Schema.toStandardSchemaV1(banUserSchema))
   .handler(async ({ data, context: { authService } }) => {
     const request = getRequest();
     await authService.api.banUser({
@@ -371,7 +376,7 @@ function BanDialog({
   const isHydrated = useHydrated();
   const banUserServerFn = useServerFn(banUser);
   const banUserMutation = useMutation({
-    mutationFn: async (data: z.input<typeof banUserSchema>) =>
+    mutationFn: async (data: typeof banUserSchema.Type) =>
       banUserServerFn({ data }),
     onSuccess: () => {
       onOpenChange(false);
@@ -385,7 +390,7 @@ function BanDialog({
       banReason: "",
     },
     validators: {
-      onSubmit: banUserSchema,
+      onSubmit: Schema.toStandardSchemaV1(banUserSchema),
     },
     onSubmit: ({ value }) => {
       if (userId) banUserMutation.mutate(value);

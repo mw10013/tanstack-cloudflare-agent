@@ -1,8 +1,8 @@
 import * as React from "react";
 import { createFileRoute, redirect, useRouter } from "@tanstack/react-router";
 import { createServerFn } from "@tanstack/react-start";
+import * as Schema from "effect/Schema";
 import { ChevronLeftIcon, ChevronRightIcon, Search } from "lucide-react";
-import { z } from "zod";
 import {
   InputGroup,
   InputGroupAddon,
@@ -27,13 +27,18 @@ import {
 
 const LIMIT = 10;
 
-const customerSearchSchema = z.object({
-  page: z.coerce.number().int().min(1).default(1),
-  filter: z.string().trim().optional(),
+const customerSearchSchema = Schema.Struct({
+  page: Schema.Union([
+    Schema.Int,
+    Schema.NumberFromString.check(Schema.isInt()),
+  ]).check(Schema.isGreaterThanOrEqualTo(1)).pipe(
+    Schema.withDecodingDefaultKey(() => 1),
+  ),
+  filter: Schema.optionalKey(Schema.Trim),
 });
 
 export const getCustomers = createServerFn({ method: "GET" })
-  .inputValidator(customerSearchSchema)
+  .inputValidator(Schema.toStandardSchemaV1(customerSearchSchema))
   .handler(async ({ data, context: { repository } }) => {
     const { page, filter } = data;
     const offset = (page - 1) * LIMIT;
@@ -52,7 +57,7 @@ export const getCustomers = createServerFn({ method: "GET" })
   });
 
 export const Route = createFileRoute("/admin/customers")({
-  validateSearch: customerSearchSchema,
+  validateSearch: Schema.toStandardSchemaV1(customerSearchSchema),
   loaderDeps: ({ search }) => ({ page: search.page, filter: search.filter }),
   loader: async ({ deps }) => {
     const result = await getCustomers({ data: deps });

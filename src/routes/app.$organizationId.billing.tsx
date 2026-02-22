@@ -9,7 +9,7 @@ import {
 import { createServerFn, useServerFn } from "@tanstack/react-start";
 import { getRequest } from "@tanstack/react-start/server";
 import { AlertCircle } from "lucide-react";
-import * as z from "zod";
+import * as Schema from "effect/Schema";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import {
@@ -20,11 +20,11 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 
-const organizationIdSchema = z.object({ organizationId: z.string() });
+const organizationIdSchema = Schema.Struct({ organizationId: Schema.String });
 
-const subscriptionActionSchema = z.object({
-  organizationId: z.string(),
-  subscriptionId: z.string(),
+const subscriptionActionSchema = Schema.Struct({
+  organizationId: Schema.String,
+  subscriptionId: Schema.String,
 });
 
 export const Route = createFileRoute("/app/$organizationId/billing")({
@@ -33,7 +33,7 @@ export const Route = createFileRoute("/app/$organizationId/billing")({
 });
 
 const getLoaderData = createServerFn({ method: "GET" })
-  .inputValidator(organizationIdSchema)
+  .inputValidator(Schema.toStandardSchemaV1(organizationIdSchema))
   .handler(async ({ data: { organizationId }, context: { authService } }) => {
     const request = getRequest();
     const subscriptions = await authService.api.listActiveSubscriptions({
@@ -249,7 +249,7 @@ function NoSubscriptionCard() {
  * Authorization is enforced by better-auth createBillingPortal.
  */
 const manageBilling = createServerFn({ method: "POST" })
-  .inputValidator(organizationIdSchema)
+  .inputValidator(Schema.toStandardSchemaV1(organizationIdSchema))
   .handler(async ({ data: { organizationId }, context: { authService } }) => {
     const request = getRequest();
     const result = await authService.api.createBillingPortal({
@@ -267,7 +267,7 @@ const manageBilling = createServerFn({ method: "POST" })
  * Authorization is enforced by better-auth cancelSubscription.
  */
 const cancelSubscription = createServerFn({ method: "POST" })
-  .inputValidator(subscriptionActionSchema)
+  .inputValidator(Schema.toStandardSchemaV1(subscriptionActionSchema))
   .handler(
     async ({
       data: { organizationId, subscriptionId },
@@ -292,7 +292,7 @@ const cancelSubscription = createServerFn({ method: "POST" })
  * Authorization is enforced by better-auth restoreSubscription.
  */
 const restoreSubscription = createServerFn({ method: "POST" })
-  .inputValidator(subscriptionActionSchema)
+  .inputValidator(Schema.toStandardSchemaV1(subscriptionActionSchema))
   .handler(
     async ({
       data: { organizationId, subscriptionId },

@@ -10,7 +10,7 @@ import {
 import { createServerFn, useServerFn } from "@tanstack/react-start";
 import { getRequest } from "@tanstack/react-start/server";
 import { AlertCircle } from "lucide-react";
-import * as z from "zod";
+import * as Schema from "effect/Schema";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { Switch } from "@/components/ui/switch";
@@ -31,9 +31,11 @@ const getLoaderData = createServerFn({ method: "GET" }).handler(
 
 const upgradeSubscriptionServerFn = createServerFn({ method: "POST" })
   .inputValidator(
-    z.object({
-      intent: z.string().min(1),
-    }),
+    Schema.toStandardSchemaV1(
+      Schema.Struct({
+        intent: Schema.NonEmptyString,
+      }),
+    ),
   )
   .handler(
     async ({

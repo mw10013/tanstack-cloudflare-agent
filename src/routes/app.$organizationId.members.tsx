@@ -3,7 +3,7 @@ import { useMutation } from "@tanstack/react-query";
 import { createFileRoute, useRouter } from "@tanstack/react-router";
 import { createServerFn, useServerFn } from "@tanstack/react-start";
 import { getRequest } from "@tanstack/react-start/server";
-import * as z from "zod";
+import * as Schema from "effect/Schema";
 import { Button } from "@/components/ui/button";
 import {
   Card,
@@ -28,7 +28,18 @@ import {
 } from "@/components/ui/select";
 import * as Domain from "@/lib/domain";
 
-const organizationIdSchema = z.object({ organizationId: z.string() });
+const organizationIdSchema = Schema.Struct({ organizationId: Schema.String });
+
+const removeMemberSchema = Schema.Struct({
+  organizationId: Schema.String,
+  memberId: Schema.String,
+});
+
+const updateMemberRoleSchema = Schema.Struct({
+  organizationId: Schema.String,
+  memberId: Schema.String,
+  role: Schema.Literals(Domain.AssignableMemberRoleValues),
+});
 
 export const Route = createFileRoute("/app/$organizationId/members")({
   loader: ({ params: data }) => getLoaderData({ data }),
@@ -36,7 +47,7 @@ export const Route = createFileRoute("/app/$organizationId/members")({
 });
 
 const getLoaderData = createServerFn({ method: "GET" })
-  .inputValidator(organizationIdSchema)
+  .inputValidator(Schema.toStandardSchemaV1(organizationIdSchema))
   .handler(async ({ data: { organizationId }, context: { authService } }) => {
     const request = getRequest();
     const session = await authService.api.getSession({
@@ -77,12 +88,7 @@ const getLoaderData = createServerFn({ method: "GET" })
  * Authorization is enforced by better-auth removeMember.
  */
 const removeMember = createServerFn({ method: "POST" })
-  .inputValidator(
-    z.object({
-      organizationId: z.string(),
-      memberId: z.string(),
-    }),
-  )
+  .inputValidator(Schema.toStandardSchemaV1(removeMemberSchema))
   .handler(
     async ({
       data: { organizationId, memberId },
@@ -100,7 +106,7 @@ const removeMember = createServerFn({ method: "POST" })
  * Authorization is enforced by better-auth leaveOrganization.
  */
 const leaveOrganization = createServerFn({ method: "POST" })
-  .inputValidator(organizationIdSchema)
+  .inputValidator(Schema.toStandardSchemaV1(organizationIdSchema))
   .handler(async ({ data: { organizationId }, context: { authService } }) => {
     const request = getRequest();
     await authService.api.leaveOrganization({
@@ -113,13 +119,7 @@ const leaveOrganization = createServerFn({ method: "POST" })
  * Authorization is enforced by better-auth updateMemberRole.
  */
 const updateMemberRole = createServerFn({ method: "POST" })
-  .inputValidator(
-    z.object({
-      organizationId: z.string(),
-      memberId: z.string(),
-      role: z.enum(Domain.AssignableMemberRoleValues),
-    }),
-  )
+  .inputValidator(Schema.toStandardSchemaV1(updateMemberRoleSchema))
   .handler(
     async ({
       data: { organizationId, memberId, role },

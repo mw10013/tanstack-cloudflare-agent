@@ -9,7 +9,7 @@ import {
 import { createServerFn, useServerFn } from "@tanstack/react-start";
 import { useAgent } from "agents/react";
 import * as React from "react";
-import * as z from "zod";
+import * as Schema from "effect/Schema";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import {
@@ -22,8 +22,10 @@ import {
 import { Input } from "@/components/ui/input";
 import { buildGoogleAuthorizationRequest } from "@/lib/google-oauth-client";
 
-const searchSchema = z.object({
-  google: z.enum(["connected", "denied", "error"]).optional(),
+const searchSchema = Schema.Struct({
+  google: Schema.optionalKey(
+    Schema.Literals(["connected", "denied", "error"]),
+  ),
 });
 
 interface GoogleStatusData {
@@ -82,7 +84,7 @@ const beginGoogleConnect = createServerFn({ method: "POST" })
   });
 
 export const Route = createFileRoute("/app/$organizationId/google")({
-  validateSearch: searchSchema,
+  validateSearch: Schema.toStandardSchemaV1(searchSchema),
   component: RouteComponent,
 });
 

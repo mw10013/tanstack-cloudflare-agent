@@ -24,7 +24,6 @@ import {
   XCircle,
 } from "lucide-react";
 import * as React from "react";
-import * as z from "zod";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import {
@@ -42,40 +41,38 @@ import {
 } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
 
-const organizationIdSchema = z.object({
-  organizationId: z.string().min(1),
+const organizationIdSchema = Schema.Struct({
+  organizationId: Schema.NonEmptyString,
 });
 
-const uploadNameSchema = z
-  .string()
-  .trim()
-  .min(1, "Name is required")
-  .regex(/^[A-Za-z0-9_-]+$/, "Name can only contain letters, numbers, underscores, and hyphens");
+const uploadNameSchema = Schema.Trim
+  .check(Schema.isMinLength(1))
+  .check(Schema.isPattern(/^[A-Za-z0-9_-]+$/));
 
-const imageMimeTypes = ["image/png", "image/jpeg", "image/webp", "image/gif"];
+const imageMimeTypes = ["image/png", "image/jpeg", "image/webp", "image/gif"] as const;
 
-const uploadFormSchema = z.object({
+const uploadImageFileSchema = Schema.File
+  .check(Schema.isMinSize(1))
+  .check(Schema.isMaxSize(5_000_000))
+  .check(
+    Schema.makeFilter((file) =>
+      imageMimeTypes.includes(file.type as (typeof imageMimeTypes)[number])
+    ),
+  );
+
+const uploadFormSchema = Schema.Struct({
   name: uploadNameSchema,
-  file: z
-    .file()
-    .min(1, "File is required")
-    .max(5_000_000, "File must be under 5MB")
-    .mime(imageMimeTypes),
+  file: uploadImageFileSchema,
 });
 
-const deleteUploadSchema = z.object({
+const deleteUploadSchema = Schema.Struct({
   name: uploadNameSchema,
 });
 
 const uploadFile = createServerFn({ method: "POST" })
   .inputValidator((data) => {
     if (!(data instanceof FormData)) throw new Error("Expected FormData");
-    return z
-      .object({
-        name: uploadNameSchema,
-        file: z.file().max(5_000_000).mime(imageMimeTypes),
-      })
-      .parse(Object.fromEntries(data));
+    return Schema.decodeUnknownSync(uploadFormSchema)(Object.fromEntries(data));
   })
   .handler(async ({ context: { session, env }, data }) => {
     invariant(session, "Missing session");
@@ -101,7 +98,7 @@ const uploadFile = createServerFn({ method: "POST" })
   });
 
 const deleteUpload = createServerFn({ method: "POST" })
-  .inputValidator(deleteUploadSchema)
+  .inputValidator(Schema.toStandardSchemaV1(deleteUploadSchema))
   .handler(async ({ context: { session, env }, data }) => {
     invariant(session, "Missing session");
     const organizationId = session.session.activeOrganizationId;
@@ -121,7 +118,7 @@ const deleteUpload = createServerFn({ method: "POST" })
   });
 
 const getUploads = createServerFn({ method: "GET" })
-  .inputValidator(organizationIdSchema)
+  .inputValidator(Schema.toStandardSchemaV1(organizationIdSchema))
   .handler(async ({ context: { session, env }, data: { organizationId } }) => {
     invariant(session, "Missing session");
     invariant(
@@ -220,7 +217,7 @@ function RouteComponent() {
       file: null as File | null,
     },
     validators: {
-      onSubmit: uploadFormSchema,
+      onSubmit: Schema.toStandardSchemaV1(uploadFormSchema),
     },
     onSubmit: ({ value }) => {
       const fd = new FormData();

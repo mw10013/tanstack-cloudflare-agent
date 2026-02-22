@@ -7,8 +7,9 @@ import {
 } from "@tanstack/react-router";
 import { createServerFn, useServerFn } from "@tanstack/react-start";
 import { getRequest } from "@tanstack/react-start/server";
+import * as Schema from "effect/Schema";
+import * as SchemaTransformation from "effect/SchemaTransformation";
 import { AlertCircle } from "lucide-react";
-import * as z from "zod";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import {
@@ -40,6 +41,14 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import * as Domain from "@/lib/domain";
+
+const emailPattern = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
+const splitEmails = (value: string) =>
+  value
+    .split(",")
+    .map((item) => item.trim())
+    .filter(Boolean);
 
 export const Route = createFileRoute("/app/$organizationId/invitations")({
   loader: ({ params: data }) => getLoaderData({ data }),
@@ -112,30 +121,29 @@ function RouteComponent() {
   );
 }
 
-const inviteSchema = z.object({
-  organizationId: z.string(),
-  emails: z
-    .string()
-    .transform((v) =>
-      v
-        .split(",")
-        .map((i) => i.trim())
-        .filter(Boolean),
-    )
-    .refine(
-      (emails) => emails.every((email) => z.email().safeParse(email).success),
-      "Please provide valid email addresses.",
-    )
-    .refine((emails) => emails.length >= 1, "At least one email is required")
-    .refine((emails) => emails.length <= 10, "Maximum 10 emails allowed"),
-  role: z.enum(Domain.AssignableMemberRoleValues),
+const inviteSchema = Schema.Struct({
+  organizationId: Schema.String,
+  emails: Schema.String.pipe(
+    Schema.decodeTo(
+      Schema.Array(Schema.String.check(Schema.isPattern(emailPattern)))
+        .check(Schema.isMinLength(1))
+        .check(Schema.isMaxLength(10)),
+      SchemaTransformation.transform({
+        decode: (value): readonly string[] => splitEmails(value),
+        encode: (emails: readonly string[]) => emails.join(", "),
+      }),
+    ),
+  ),
+  role: Schema.Literals(Domain.AssignableMemberRoleValues),
 });
+
+const invitationIdSchema = Schema.Struct({ invitationId: Schema.String });
 
 /**
  * Authorization is enforced by better-auth createInvitation.
  */
 const invite = createServerFn({ method: "POST" })
-  .inputValidator(inviteSchema)
+  .inputValidator(Schema.toStandardSchemaV1(inviteSchema))
   .handler(
     async ({
       data: { organizationId, emails, role },
@@ -172,7 +180,7 @@ function InviteForm({ organizationId }: { organizationId: string }) {
   const isHydrated = useHydrated();
   const inviteServerFn = useServerFn(invite);
   const inviteMutation = useMutation({
-    mutationFn: (data: z.input<typeof inviteSchema>) =>
+    mutationFn: (data: typeof inviteSchema.Encoded) =>
       inviteServerFn({ data }),
     onSuccess: () => {
       form.reset();
@@ -187,7 +195,7 @@ function InviteForm({ organizationId }: { organizationId: string }) {
       role: "member" as Extract<Domain.MemberRole, "member" | "admin">,
     },
     validators: {
-      onSubmit: inviteSchema,
+      onSubmit: Schema.toStandardSchemaV1(inviteSchema),
     },
     onSubmit: ({ value }) => {
       inviteMutation.mutate(value);
@@ -301,7 +309,7 @@ function InviteForm({ organizationId }: { organizationId: string }) {
  * Authorization is enforced by better-auth cancelInvitation.
  */
 const cancelInvitation = createServerFn({ method: "POST" })
-  .inputValidator(z.object({ invitationId: z.string() }))
+  .inputValidator(Schema.toStandardSchemaV1(invitationIdSchema))
   .handler(async ({ data: { invitationId }, context: { authService } }) => {
     const request = getRequest();
     await authService.api.cancelInvitation({
