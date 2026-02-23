@@ -78,7 +78,7 @@ export default {
       transactionalEmail: env.TRANSACTIONAL_EMAIL,
       stripeWebhookSecret: env.STRIPE_WEBHOOK_SECRET,
     });
-    const runEffect = makeRunEffect();
+    const runEffect = makeRunEffect(env);
 
     const routed = await routeAgentRequest(request, env, {
       onBeforeConnect: async (req) => {
