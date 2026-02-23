@@ -78,9 +78,7 @@ export default {
       transactionalEmail: env.TRANSACTIONAL_EMAIL,
       stripeWebhookSecret: env.STRIPE_WEBHOOK_SECRET,
     });
-    const runEffect = makeRunEffect({
-      greeting: { greet: () => "Hello from Effect 4 ServiceMap!" },
-    });
+    const runEffect = makeRunEffect();
 
     const routed = await routeAgentRequest(request, env, {
       onBeforeConnect: async (req) => {
