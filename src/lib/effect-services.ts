@@ -1,12 +1,16 @@
-import type { Effect } from "effect";
-import { ServiceMap } from "effect";
+import { Effect, ServiceMap } from "effect";
 
 export const Greeting = ServiceMap.Service<{
   readonly greet: () => string;
 }>("Greeting");
 
-export type AppServices = typeof Greeting.Identifier;
+export const makeAppServiceMap = (impls: {
+  readonly greeting: typeof Greeting.Service;
+}) =>
+  ServiceMap.make(Greeting, impls.greeting);
 
-export type RunEffect = <A, E>(
-  effect: Effect.Effect<A, E, AppServices>,
-) => Promise<A>;
+export const makeRunEffect = (
+  ...args: Parameters<typeof makeAppServiceMap>
+) => Effect.runPromiseWith(makeAppServiceMap(...args));
+
+export type RunEffect = ReturnType<typeof makeRunEffect>;

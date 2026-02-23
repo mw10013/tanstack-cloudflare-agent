@@ -4,10 +4,9 @@ import type { Repository } from "@/lib/repository";
 import type { StripeService } from "@/lib/stripe-service";
 import serverEntry from "@tanstack/react-start/server-entry";
 import { getAgentByName, routeAgentRequest } from "agents";
-import { Effect, ServiceMap } from "effect";
 import * as Exit from "effect/Exit";
 import * as Schema from "effect/Schema";
-import { Greeting } from "@/lib/effect-services";
+import { makeRunEffect } from "@/lib/effect-services";
 import { createAuthService } from "@/lib/auth-service";
 import { createD1SessionService } from "@/lib/d1-session-service";
 import { createRepository } from "@/lib/repository";
@@ -79,10 +78,9 @@ export default {
       transactionalEmail: env.TRANSACTIONAL_EMAIL,
       stripeWebhookSecret: env.STRIPE_WEBHOOK_SECRET,
     });
-    const serviceMap = ServiceMap.make(Greeting, {
-      greet: () => "Hello from Effect 4 ServiceMap!",
+    const runEffect = makeRunEffect({
+      greeting: { greet: () => "Hello from Effect 4 ServiceMap!" },
     });
-    const runEffect = Effect.runPromiseWith(serviceMap);
 
     const routed = await routeAgentRequest(request, env, {
       onBeforeConnect: async (req) => {
