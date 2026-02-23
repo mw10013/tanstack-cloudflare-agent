@@ -20,7 +20,7 @@ Surface area: `prepare`, `batch`, `run`, `first`
 | `ConfigEx.object('D1')`                             | `yield* CloudflareEnv` then `.D1`                                         |
 | `Cause.isUnknownException(e)`                       | `Cause.isUnknownError(e)` -- renamed, cause in `Error.cause` not `.error` |
 | `Effect.catchAll`                                   | `Effect.catch`                                                            |
-| Auto-generated `.Default` layer                     | No auto layer -- but we're skipping layers entirely (see below)           |
+| Auto-generated `.Default` layer                     | No auto layer -- define `layer` export explicitly                         |
 | `accessors: true`                                   | Removed -- use `yield* D1` or `D1.use(...)`                               |
 
 ### `Cause.isUnknownError` (Effect 4)
@@ -168,7 +168,7 @@ Layer as declarative recipe. `Effect.provide` at the runner wires it in with aut
 
 ```ts
 // src/lib/d1.ts (additional exports)
-export const makeD1 = Effect.gen(function* () {
+const make = Effect.gen(function* () {
   const { D1: d1 } = yield* CloudflareEnv;
   return D1.of({
     prepare: (query) => d1.prepare(query),
@@ -179,13 +179,13 @@ export const makeD1 = Effect.gen(function* () {
   });
 });
 
-export const D1Live = Layer.effect(D1)(makeD1);
+export const layer = Layer.effect(D1)(make);
 ```
 
 ```ts
 // src/lib/effect-services.ts
 import { ConfigProvider, Effect, Layer, ServiceMap } from "effect";
-import { D1Live } from "./d1";
+import * as D1Mod from "./d1";
 
 export const CloudflareEnv = ServiceMap.Service<Env>("CloudflareEnv");
 
@@ -210,12 +210,14 @@ export const makeRunEffect = (env: Env) => {
   const run = Effect.runPromiseWith(baseServices);
 
   return <A, E>(effect: Effect.Effect<A, E>) =>
-    run(effect.pipe(Effect.provide(D1Live)));
+    run(effect.pipe(Effect.provide(D1Mod.layer)));
 };
 ```
 
 ```ts
 // Consumer usage -- D1 just works
+import { D1 } from "./d1";
+
 const program = Effect.gen(function* () {
   const d1 = yield* D1;
   const stmt = d1.prepare("select * from User where id = ?").bind(userId);
@@ -226,10 +228,10 @@ runEffect(program); // D1 provided automatically
 
 **How it works**:
 
-1. `D1Live = Layer.effect(D1)(makeD1)` -- declarative: "to build D1, run this Effect"
-2. `effect.pipe(Effect.provide(D1Live))` -- tells the runtime to provide D1 via the layer
+1. `layer = Layer.effect(D1)(make)` -- declarative: "to build D1, run this Effect"
+2. `effect.pipe(Effect.provide(D1Mod.layer))` -- tells the runtime to provide D1 via the layer
 3. Internally, `Effect.provide` calls `Layer.buildWithScope` which uses the fiber's shared `MemoMap`
-4. First call builds D1 (runs `makeD1`, which `yield*`s CloudflareEnv from `baseServices`). Subsequent calls in the same fiber reuse the cached result.
+4. First call builds D1 (runs `make`, which `yield*`s CloudflareEnv from `baseServices`). Subsequent calls in the same fiber reuse the cached result.
 5. `Effect.provide` eliminates `D1` from the `R` type. `baseServices` (via `runPromiseWith`) satisfies `CloudflareEnv`.
 
 **Why this is the general pattern**:
@@ -238,30 +240,24 @@ runEffect(program); // D1 provided automatically
 - `makeEffect` can `yield*` any other service (proper dependency graph)
 - Auto-memoized -- no manual caching, no `Effect.cached` wrapping
 - No ManagedRuntime lifecycle to manage
-- Adding services = adding layers, composable: `Effect.provide([D1Live, AuthLive, ...])`
+- Adding services = adding layers, composable: `Effect.provide([D1Mod.layer, AuthMod.layer, ...])`
 - Layer composition via `Layer.provide` for inter-layer dependencies
 
 **Scaling to multiple services**:
 
 ```ts
-// Each service defines its own layer
-export const AuthLive = Layer.effect(Auth)(
-  Effect.gen(function* () {
-    const env = yield* CloudflareEnv;
-    // ... effectful construction
-  }),
-);
+import * as AuthMod from "./auth";
 
 // In makeRunEffect -- provide all layers
 return <A, E>(effect: Effect.Effect<A, E>) =>
-  run(effect.pipe(Effect.provide([D1Live, AuthLive])));
+  run(effect.pipe(Effect.provide([D1Mod.layer, AuthMod.layer])));
 
 // Or compose layers that depend on each other
-const AppLive = Layer.mergeAll(D1Live, AuthLive).pipe(
-  Layer.provide(SomeSharedDependencyLive),
+const appLayer = Layer.mergeAll(D1Mod.layer, AuthMod.layer).pipe(
+  Layer.provide(SomeSharedDep.layer),
 );
 return <A, E>(effect: Effect.Effect<A, E>) =>
-  run(effect.pipe(Effect.provide(AppLive)));
+  run(effect.pipe(Effect.provide(appLayer)));
 ```
 
 <!-- annotate: D -->
@@ -290,6 +286,110 @@ Used `ManagedRuntime.make(appLayer)`. Gets Layer's memoization but adds lifecycl
 Used `makeD1Shape(env.D1)` -- pure function, no Effect. Works for D1 specifically but doesn't generalize. Services needing effectful construction can't use this pattern.
 
 </details>
+
+## Layer Naming Convention (Effect 4)
+
+From `refs/effect4/migration/services.md:196-199`:
+
+> v4 adopts the convention of naming layers with `layer` (e.g. `Logger.layer`) instead of v3's `Default` or `Live`. Use `layer` for the primary layer and descriptive suffixes for variants (e.g. `layerTest`, `layerConfig`).
+
+| Purpose            | Name             | Example                                             |
+| ------------------ | ---------------- | --------------------------------------------------- |
+| Primary/production | `layer`          | `export const layer = Layer.effect(D1)(make)`       |
+| Test/mock          | `layerTest`      | `export const layerTest = Layer.succeed(D1)({...})` |
+| Variant            | `layer{Variant}` | `layerPosix`, `layerConfig`, `layerClient`          |
+
+Consumers use namespace imports so names read as `D1Mod.layer`, `Auth.layer`, etc.
+
+### Examples from Effect 4 source
+
+Module-level exports:
+
+```ts
+// refs/effect4/packages/platform-node-shared/src/NodeFileSystem.ts:640
+export const layer: Layer.Layer<FileSystem> = Layer.effect(FileSystem.FileSystem)(makeFileSystem)
+
+// refs/effect4/packages/platform-node-shared/src/NodePath.ts:37,48
+export const layerPosix: Layer.Layer<Path> = ...
+export const layerWin32: Layer.Layer<Path> = ...
+
+// refs/effect4/packages/platform-node/src/NodeHttpServer.ts:411
+export const layerTest: Layer.Layer<...>
+
+// refs/effect4/packages/ai/openai/src/OpenAiClient.ts:270
+export const layer = (options: Options): Layer.Layer<OpenAiClient, ...>
+```
+
+Static members on ServiceMap.Service classes (same convention, just on a class):
+
+```ts
+// refs/effect4/packages/effect/test/cluster/TestEntity.ts:67
+static layer = Layer.effect(this)(this.make)
+
+// refs/effect4/packages/sql/d1/test/utils.ts:14,31
+static layer = Layer.effect(this)(...)
+static layerClient = Layer.unwrap(...)
+```
+
+The v3 `Live` suffix still appears in some test fixtures and JSDoc examples (`JsonPlaceholderLive`, `AuthLive`) but the migration guide explicitly moves away from it.
+
+## `Layer.unwrap` -- Effect that produces a Layer
+
+`Layer.unwrap` converts `Effect<Layer<A, E1, R1>, E, R>` into `Layer<A, E | E1, R1 | R>`.
+
+Signature from `refs/effect4/packages/effect/src/Layer.ts:869-874`:
+
+```ts
+export const unwrap = <A, E1, R1, E, R>(
+  self: Effect<Layer<A, E1, R1>, E, R>
+): Layer<A, E | E1, R1 | Exclude<R, Scope.Scope>>
+```
+
+Use case: when your effectful construction produces a **Layer** (not a service value). This happens when you need to `yield*` to get config/dependencies, then use those to call another function that returns a Layer.
+
+### Examples from Effect 4 source
+
+```ts
+// refs/effect4/packages/sql/d1/test/utils.ts:31-37
+// Need to yield* D1Miniflare to get the db, then call D1Client.layer({ db }) which returns a Layer
+static layerClient = Layer.unwrap(
+  Effect.gen(function*() {
+    const miniflare = yield* D1Miniflare
+    const db: D1Database = yield* Effect.tryPromise(() => miniflare.getD1Database("DB"))
+    return D1Client.layer({ db })   // <-- returns a Layer, not a service value
+  })
+).pipe(Layer.provide(this.layer))
+
+// refs/effect4/packages/platform-node/src/NodeClusterHttp.ts:129-136
+// Need to yield* config to determine which server layer to return
+export const layerHttpServer = Effect.gen(function*() {
+  const config = yield* ShardingConfig.ShardingConfig
+  const listenAddress = config.runnerListenAddress ?? config.runnerAddress
+  return NodeHttpServer.layer(createServer, listenAddress)  // <-- returns a Layer
+}).pipe(Layer.unwrap)
+
+// refs/effect4/packages/platform-node/test/NodeRedis.test.ts:8-21
+// Need to yield* (acquire a container), then use its host/port to make a Layer
+const RedisLayer = Layer.unwrap(
+  Effect.gen(function*() {
+    const container = yield* Effect.acquireRelease(
+      Effect.promise(() => new RedisContainer("redis:alpine").start()),
+      (container) => Effect.promise(() => container.stop())
+    )
+    return NodeRedis.layer({ host: container.getHost(), port: container.getMappedPort(6379) })
+  })
+)
+```
+
+### `Layer.effect` vs `Layer.unwrap`
+
+|                | `Layer.effect(tag)(effect)`          | `Layer.unwrap(effect)`                        |
+| -------------- | ------------------------------------ | --------------------------------------------- |
+| Effect returns | service value (`D1Shape`)            | a Layer (`Layer<D1, ...>`)                    |
+| Use when       | you're building the service directly | you're calling something that returns a Layer |
+| Our D1         | yes -- we build D1Shape directly     | no -- not needed                              |
+
+`Layer.unwrap` is not needed for our D1 service since `make` returns the service value directly. It would be relevant if, say, we were wrapping `D1Client.layer({ db })` from `@effect/sql-d1` (which returns a Layer) after fetching `db` effectfully.
 
 ## `bind` Helper
 
