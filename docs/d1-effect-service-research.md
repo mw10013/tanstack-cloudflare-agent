@@ -238,6 +238,8 @@ runEffect(program.pipe(Effect.provide(D1.layer)));
 
 ### Approach B: Use official @effect/sql-d1 pattern
 
+Check if supports batch. If not, reduce this section saying we're not using due to no batch support.
+
 The official `D1Client` from `refs/effect4/packages/sql/d1/src/D1Client.ts` provides:
 
 - `SqlClient` interface with prepared statement caching
@@ -286,7 +288,11 @@ Two integration paths:
 
 1. Do we want D1 session (bookmark) support in the Effect D1 service? Currently `d1-session-service.ts` wraps D1 with `withSession(bookmark)` for read-after-write consistency.
 
+Defer
+
 2. Should the D1 service return raw `D1Result` types or decode with Effect Schema?
+
+Raw
 
 3. Do we want the `bind` dual helper from cerr? It lets you pipe bind values:
 
@@ -295,6 +301,13 @@ Two integration paths:
      D1.prepare("select * from User where id = ?").pipe(D1Ns.bind(userId));
    ```
 
+Keep
+
 4. Should `tryD1` error mapping be more granular? cerr checks `Cause.isUnknownException` which may not exist in Effect 4.
 
+Check if that exists in Effect 4. We'll probably need to iterate on tryD1 later.
+
 5. Layer wiring: should `D1.layer` be pre-provided with `CloudflareEnv` in `makeRunEffect`, or provided at call site?
+
+How can we do this without layer? Prefer to use CloudflareEnv service directly to get 
+D1 binding.
