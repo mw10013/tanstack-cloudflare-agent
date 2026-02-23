@@ -34,7 +34,7 @@ const sessionSearchSchema = Schema.Struct({
   ]).check(Schema.isGreaterThanOrEqualTo(1)).pipe(
     Schema.withDecodingDefaultKey(() => 1),
   ),
-  filter: Schema.optionalKey(Schema.Trim),
+  filter: Schema.optional(Schema.Trim),
 });
 
 export const getSessions = createServerFn({ method: "GET" })
