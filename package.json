@@ -50,6 +50,7 @@
     "refs:aws4fetch": "rm -rf refs/aws4fetch && mkdir -p refs/aws4fetch && curl -L https://github.com/mhart/aws4fetch/archive/refs/tags/v1.0.20.tar.gz | tar -xz -C refs/aws4fetch --strip-components=1",
     "refs:effect4": "rm -rf refs/effect4 && mkdir -p refs/effect4 && curl -L https://github.com/Effect-TS/effect-smol/archive/refs/tags/effect@4.0.0-beta.5.tar.gz | tar -xz -C refs/effect4 --strip-components=1",
     "refs:zod": "rm -rf refs/zod && mkdir -p refs/zod && curl -L https://github.com/colinhacks/zod/archive/refs/tags/v4.3.3.tar.gz | tar -xz -C refs/zod --strip-components=1",
+    "refs:cerr": "rm -rf refs/cerr && mkdir -p refs/cerr && curl -L https://github.com/mw10013/cloudflare-effect-react-router/archive/refs/heads/main.tar.gz | tar -xz -C refs/cerr --strip-components=1",
     "clone:links": "[ ! -e refs ] && ln -s ../tanstack-cloudflare-agent/refs refs; [ ! -e todo.md ] && ln -s ../tanstack-cloudflare-agent/todo.md todo.md"
   },
   "dependencies": {
