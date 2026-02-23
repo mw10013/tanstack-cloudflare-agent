@@ -37,7 +37,6 @@ Official D1Client has no `batch` support. It wraps D1 with SqlClient interface (
 2. **Return types** -- Raw D1 types, no Schema decoding in the service
 3. **`bind` dual helper** -- Keep
 4. **`tryD1` error mapping** -- Use `Cause.isUnknownError` + `Error.cause`. Will iterate later.
-5. **No Layer** -- Use `CloudflareEnv` service directly, no `Layer.effect`
 
 ## The Core Problem
 
@@ -45,14 +44,58 @@ We want:
 
 - D1 in the ServiceMap (so other services can `yield* D1`)
 - D1's construction to `yield* CloudflareEnv` (proper service dependency)
+- A general pattern that works for any service with effectful construction
 
-But: `ServiceMap.add(tag, value)` takes a **plain value**, not an Effect. Building D1 requires `yield*` (effectful). This is the fundamental tension.
+`ServiceMap.add(tag, value)` takes a **plain value**, not an Effect. Building D1 requires `yield*` (effectful). This is the fundamental tension.
 
-After scanning `refs/effect4` exhaustively (ServiceMap.ts, Effect.ts, ManagedRuntime.ts, internal/effect.ts, tests, specs, patterns):
+## Key Discovery: `Effect.provide` Accepts Layers (with auto-memoization)
 
-- **ServiceMap is purely synchronous** -- no effectful construction API
-- **Layer is the bridge** from effectful construction to ServiceMap
-- **`Effect.provideServiceEffect`** is the only layer-free way to wire "service A needs service B"
+Deep scan of `refs/effect4` revealed:
+
+1. **`Effect.provide(layer)`** accepts a Layer (not just a ServiceMap). See `refs/effect4/packages/effect/src/internal/layer.ts:8-22`.
+2. **In Effect 4, layers are auto-memoized across `Effect.provide` calls** via a fiber-level shared `MemoMap`. This is NEW vs Effect 3 where each `provide` call had its own memo scope. See `refs/effect4/migration/layer-memoization.md`.
+3. **`Layer.effect(tag)(effectThatBuildsService)`** creates a Layer from an Effect that can `yield*` other services. See `refs/effect4/packages/effect/src/Layer.ts:764-783`.
+
+This means: define your service construction as a Layer, provide it via `Effect.provide`, and it's automatically lazy + cached. No ManagedRuntime needed. No lifecycle to manage. Layer is just the declarative recipe.
+
+```ts
+// From refs/effect4/migration/layer-memoization.md
+const MyServiceLayer = Layer.effect(MyService)(
+  Effect.gen(function* () {
+    yield* Console.log("Building MyService"); // logged ONCE even across multiple provide calls
+    return { value: "hello" };
+  }),
+);
+
+const program = Effect.gen(function* () {
+  const a = yield* MyService;
+  return a.value;
+}).pipe(Effect.provide(MyServiceLayer));
+```
+
+### How `Effect.provide(layer)` works internally
+
+```ts
+// refs/effect4/packages/effect/src/internal/layer.ts:8-22
+const provideLayer = (self, layer, options?) =>
+  effect.scopedWith((scope) =>
+    effect.flatMap(
+      options?.local
+        ? Layer.buildWithMemoMap(layer, Layer.makeMemoMapUnsafe(), scope)
+        : Layer.buildWithScope(layer, scope), // uses fiber's shared MemoMap
+      (context) => effect.provideServices(self, context),
+    ),
+  );
+```
+
+`Layer.buildWithScope` pulls the MemoMap from the current fiber (`CurrentMemoMap.getOrCreate(fiber.services)`) -- so all `Effect.provide(layer)` calls in the same fiber share the same cache. The layer's Effect runs once, result is cached.
+
+### Other mechanisms found (not recommended for our case)
+
+- **`Effect.provideServiceEffect`** -- no caching, rebuilds every call (`flatMap` internally)
+- **`Effect.cached`** -- manual memoization wrapper, adds nesting complexity
+- **`ManagedRuntime.make(layer)`** -- full lifecycle management with dispose(), overkill
+- **`Layer.fresh(layer)`** / `Effect.provide(layer, { local: true })` -- opt OUT of memoization
 
 ## Shared Code (all approaches use this)
 
@@ -119,12 +162,12 @@ export const bind = dual<
 );
 ```
 
-## Approach A: `provideServiceEffect` in `makeRunEffect`
+## Approach D: `Layer.effect` + `Effect.provide` (recommended)
 
-D1's `make` is an Effect that `yield*`s CloudflareEnv. The runner wraps every program with `provideServiceEffect` so D1 is transparently available.
+Layer as declarative recipe. `Effect.provide` at the runner wires it in with auto-memoization. No ManagedRuntime, no lifecycle management.
 
 ```ts
-// src/lib/d1.ts (additional export)
+// src/lib/d1.ts (additional exports)
 export const makeD1 = Effect.gen(function* () {
   const { D1: d1 } = yield* CloudflareEnv;
   return D1.of({
@@ -135,23 +178,39 @@ export const makeD1 = Effect.gen(function* () {
       tryD1(() => statement.first<T>()),
   });
 });
+
+export const D1Live = Layer.effect(D1)(makeD1);
 ```
 
 ```ts
 // src/lib/effect-services.ts
-import { D1, makeD1 } from "./d1";
+import { ConfigProvider, Effect, Layer, ServiceMap } from "effect";
+import { D1Live } from "./d1";
+
+export const CloudflareEnv = ServiceMap.Service<Env>("CloudflareEnv");
+
+export const Greeting = ServiceMap.Service<{
+  readonly greet: () => string;
+}>("Greeting");
 
 export const makeRunEffect = (env: Env) => {
-  const baseRun = Effect.runPromiseWith(
-    ServiceMap.make(CloudflareEnv, env).pipe(
+  const baseServices = ServiceMap.make(CloudflareEnv, env)
+    .pipe(
+      ServiceMap.add(Greeting, {
+        greet: () => "Hello from Effect 4 ServiceMap!",
+      }),
+    )
+    .pipe(
       ServiceMap.add(
         ConfigProvider.ConfigProvider,
         ConfigProvider.fromUnknown(env),
       ),
-    ),
-  );
-  return <A, E>(effect: Effect.Effect<A, E /* D1 | CloudflareEnv | ... */>) =>
-    baseRun(effect.pipe(Effect.provideServiceEffect(D1, makeD1)));
+    );
+
+  const run = Effect.runPromiseWith(baseServices);
+
+  return <A, E>(effect: Effect.Effect<A, E>) =>
+    run(effect.pipe(Effect.provide(D1Live)));
 };
 ```
 
@@ -165,128 +224,72 @@ const program = Effect.gen(function* () {
 runEffect(program); // D1 provided automatically
 ```
 
-**How it works**: `provideServiceEffect(D1, makeD1)` says "when something needs D1, run `makeD1` to build it". `makeD1` yields CloudflareEnv which is in the base ServiceMap. The `provideServiceEffect` call eliminates `D1` from the `R` type of the effect, so `baseRun` (which has CloudflareEnv) can satisfy the remaining requirement.
+**How it works**:
 
-**Tradeoffs**:
+1. `D1Live = Layer.effect(D1)(makeD1)` -- declarative: "to build D1, run this Effect"
+2. `effect.pipe(Effect.provide(D1Live))` -- tells the runtime to provide D1 via the layer
+3. Internally, `Effect.provide` calls `Layer.buildWithScope` which uses the fiber's shared `MemoMap`
+4. First call builds D1 (runs `makeD1`, which `yield*`s CloudflareEnv from `baseServices`). Subsequent calls in the same fiber reuse the cached result.
+5. `Effect.provide` eliminates `D1` from the `R` type. `baseServices` (via `runPromiseWith`) satisfies `CloudflareEnv`.
 
-- D1 is available as a proper service tag -- consumers `yield* D1`
-- D1 `yield*`s CloudflareEnv (proper dependency)
-- D1 is rebuilt on every `runEffect` call (no caching). Fine -- construction is cheap (just wrapping `env.D1`).
-- Each new dependent service needs another `provideServiceEffect` in `makeRunEffect`
-- Type signature of `makeRunEffect` return gets wider as services are added
+**Why this is the general pattern**:
 
-<!-- annotate: A -->
+- Works for ANY service with effectful construction -- just `Layer.effect(Tag)(makeEffect)`
+- `makeEffect` can `yield*` any other service (proper dependency graph)
+- Auto-memoized -- no manual caching, no `Effect.cached` wrapping
+- No ManagedRuntime lifecycle to manage
+- Adding services = adding layers, composable: `Effect.provide([D1Live, AuthLive, ...])`
+- Layer composition via `Layer.provide` for inter-layer dependencies
 
-## Approach B: `ManagedRuntime` + Layer
-
-Uses the official `Layer` -> `ManagedRuntime` pattern. D1 is a layer that depends on CloudflareEnv layer.
-
-```ts
-// src/lib/d1.ts (additional export)
-export const makeD1 = Effect.gen(function* () {
-  const { D1: d1 } = yield* CloudflareEnv;
-  return D1.of({
-    prepare: (query) => d1.prepare(query),
-    batch: (statements) => tryD1(() => d1.batch(statements)),
-    run: (statement) => tryD1(() => statement.run()),
-    first: <T>(statement: D1PreparedStatement) =>
-      tryD1(() => statement.first<T>()),
-  });
-});
-
-export const D1Layer = Layer.effect(D1)(makeD1);
-```
+**Scaling to multiple services**:
 
 ```ts
-// src/lib/effect-services.ts
-import { Layer, ManagedRuntime } from "effect";
-import { D1Layer } from "./d1";
+// Each service defines its own layer
+export const AuthLive = Layer.effect(Auth)(
+  Effect.gen(function* () {
+    const env = yield* CloudflareEnv;
+    // ... effectful construction
+  }),
+);
 
-export const makeRunEffect = (env: Env) => {
-  const appLayer = Layer.mergeAll(
-    Layer.succeed(CloudflareEnv)(env),
-    D1Layer,
-    Layer.succeed(ConfigProvider.ConfigProvider)(
-      ConfigProvider.fromUnknown(env),
-    ),
-  ).pipe(Layer.provide(Layer.succeed(CloudflareEnv)(env)));
-  const runtime = ManagedRuntime.make(appLayer);
-  return runtime.runPromise;
-};
+// In makeRunEffect -- provide all layers
+return <A, E>(effect: Effect.Effect<A, E>) =>
+  run(effect.pipe(Effect.provide([D1Live, AuthLive])));
+
+// Or compose layers that depend on each other
+const AppLive = Layer.mergeAll(D1Live, AuthLive).pipe(
+  Layer.provide(SomeSharedDependencyLive),
+);
+return <A, E>(effect: Effect.Effect<A, E>) =>
+  run(effect.pipe(Effect.provide(AppLive)));
 ```
 
-```ts
-// Consumer usage -- identical
-const program = Effect.gen(function* () {
-  const d1 = yield* D1;
-  return yield* d1.first<{ id: string; email: string }>(stmt);
-});
-runEffect(program);
-```
+<!-- annotate: D -->
 
-**Tradeoffs**:
+---
 
-- D1 is in the ServiceMap, proper service tag, `yield*`s CloudflareEnv
-- Layer caches D1 construction (only built once per runtime)
-- ManagedRuntime provides `runPromise`, `runSync`, `runFork` etc.
-- ManagedRuntime has `dispose()` for cleanup (relevant for scoped resources)
-- Adding services = adding layers, composable via `Layer.mergeAll` / `Layer.provide`
-- More boilerplate than Approach A
-- Involves Layer (which you said you wanted to avoid)
+### Previous approaches (superseded by D)
 
-<!-- annotate: B -->
+<details>
+<summary>Approach A: provideServiceEffect (no caching)</summary>
 
-## Approach C: Eager pure build (no `yield*` on CloudflareEnv)
+Used `Effect.provideServiceEffect(D1, makeD1)` in `makeRunEffect`. Problem: `provideServiceEffect` is just `flatMap(acquire, provideService)` -- no memoization, rebuilds every call. `Effect.cached` can fix it but adds nesting. Approach D is strictly better -- same effectful construction, but with auto-memoization via Layer.
 
-D1 construction is actually pure -- `env.D1` is a synchronous binding. Build D1Shape directly from `D1Database` without needing an Effect.
+</details>
 
-```ts
-// src/lib/d1.ts (additional export -- pure function, not an Effect)
-export const makeD1Shape = (d1: D1Database): D1Shape => ({
-  prepare: (query) => d1.prepare(query),
-  batch: (statements) => tryD1(() => d1.batch(statements)),
-  run: (statement) => tryD1(() => statement.run()),
-  first: <T>(statement: D1PreparedStatement) =>
-    tryD1(() => statement.first<T>()),
-});
-```
+<details>
+<summary>Approach B: ManagedRuntime + Layer (lifecycle overhead)</summary>
 
-```ts
-// src/lib/effect-services.ts
-import { D1, makeD1Shape } from "./d1";
+Used `ManagedRuntime.make(appLayer)`. Gets Layer's memoization but adds lifecycle management (`dispose()`) that we don't need. Approach D uses the same Layer mechanism but without ManagedRuntime.
 
-export const makeRunEffect = (env: Env) =>
-  Effect.runPromiseWith(
-    ServiceMap.make(CloudflareEnv, env)
-      .pipe(ServiceMap.add(D1, makeD1Shape(env.D1)))
-      .pipe(
-        ServiceMap.add(
-          ConfigProvider.ConfigProvider,
-          ConfigProvider.fromUnknown(env),
-        ),
-      ),
-  );
-```
+</details>
 
-```ts
-// Consumer usage -- identical
-const program = Effect.gen(function* () {
-  const d1 = yield* D1;
-  return yield* d1.first<{ id: string; email: string }>(stmt);
-});
-runEffect(program);
-```
+<details>
+<summary>Approach C: Eager pure build (no yield*)</summary>
 
-**Tradeoffs**:
+Used `makeD1Shape(env.D1)` -- pure function, no Effect. Works for D1 specifically but doesn't generalize. Services needing effectful construction can't use this pattern.
 
-- D1 is in the ServiceMap, proper service tag, consumers `yield* D1`
-- Simplest -- no Layer, no `provideServiceEffect` chain
-- D1 does NOT `yield*` CloudflareEnv -- takes `D1Database` directly as a function arg
-- `makeRunEffect` passes `env.D1` explicitly, coupling the wiring site to knowing env shape
-- Works well when D1 construction is trivially derived from env (which it is)
-- If D1 construction later needs effectful setup (connection pooling, etc.), would need to switch to A or B
-
-<!-- annotate: C -->
+</details>
 
 ## `bind` Helper
 
