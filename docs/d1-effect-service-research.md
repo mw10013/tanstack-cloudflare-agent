@@ -2,166 +2,65 @@
 
 Bringing `refs/cerr/functions/shared/src/D1.ts` into our codebase using Effect 4 idioms.
 
-## Source: cerr D1.ts (Effect 3)
+## Source Analysis
+
+cerr D1.ts (Effect 3) provides:
+
+1. `D1Error` -- typed error via `Data.TaggedError`
+2. `D1` service -- gets D1Database from env via `ConfigEx.object('D1')`, wraps ops with retry/error handling
+3. `bind` dual helper -- pipe-friendly bind for prepared statements
+
+Surface area: `prepare`, `batch`, `run`, `first`
+
+## Effect 3 -> Effect 4 Key Translations
+
+| Effect 3 (cerr)                                     | Effect 4 (ours)                                                           |
+| --------------------------------------------------- | ------------------------------------------------------------------------- |
+| `Effect.Service<D1>()('D1', { accessors, effect })` | `ServiceMap.Service<D1, Shape>()('D1', { make })`                         |
+| `ConfigEx.object('D1')`                             | `yield* CloudflareEnv` then `.D1`                                         |
+| `Cause.isUnknownException(e)`                       | `Cause.isUnknownError(e)` -- renamed, cause in `Error.cause` not `.error` |
+| `Effect.catchAll`                                   | `Effect.catch`                                                            |
+| Auto-generated `.Default` layer                     | No auto layer -- but we're skipping layers entirely (see below)           |
+| `accessors: true`                                   | Removed -- use `yield* D1` or `D1.use(...)`                               |
+
+### `Cause.isUnknownError` (Effect 4)
+
+Confirmed exists: `Cause.isUnknownError` is the Effect 4 replacement for `Cause.isUnknownException`. The type is `Cause.UnknownError` with `_tag: "UnknownError"`. Original cause stored in standard `Error.cause` (not `.error` like Effect 3's `UnknownException`). `Effect.tryPromise` without `catch` defaults to wrapping in `Cause.UnknownError`.
+
+### `@effect/sql-d1` -- Not Using
+
+Official D1Client has no `batch` support. It wraps D1 with SqlClient interface (single-statement execute/executeRaw/executeValues). We need `batch` for multi-statement atomic operations. Also depends on `effect/unstable/sql/*` + `Reactivity`.
+
+## Decisions (from annotations)
+
+1. **D1 session/bookmark support** -- Defer
+2. **Return types** -- Raw D1 types, no Schema decoding in the service
+3. **`bind` dual helper** -- Keep
+4. **`tryD1` error mapping** -- Use `Cause.isUnknownError` + `Error.cause`. Will iterate later.
+5. **No Layer** -- Use `CloudflareEnv` service directly, no `Layer.effect`
+
+## The Core Problem
+
+We want:
+
+- D1 in the ServiceMap (so other services can `yield* D1`)
+- D1's construction to `yield* CloudflareEnv` (proper service dependency)
+
+But: `ServiceMap.add(tag, value)` takes a **plain value**, not an Effect. Building D1 requires `yield*` (effectful). This is the fundamental tension.
+
+After scanning `refs/effect4` exhaustively (ServiceMap.ts, Effect.ts, ManagedRuntime.ts, internal/effect.ts, tests, specs, patterns):
+
+- **ServiceMap is purely synchronous** -- no effectful construction API
+- **Layer is the bridge** from effectful construction to ServiceMap
+- **`Effect.provideServiceEffect`** is the only layer-free way to wire "service A needs service B"
+
+## Shared Code (all approaches use this)
 
 ```ts
-import {
-  Cause,
-  Config,
-  ConfigError,
-  Data,
-  Effect,
-  Either,
-  Predicate,
-  Schedule,
-} from "effect";
+// src/lib/d1.ts
+import { Cause, Data, Effect, Schedule, ServiceMap } from "effect";
 import { dual } from "effect/Function";
-import * as ConfigEx from "./ConfigEx";
-
-export class D1Error extends Data.TaggedError("D1Error")<{
-  message: string;
-  cause: Error;
-}> {}
-
-export class D1 extends Effect.Service<D1>()("D1", {
-  accessors: true,
-  effect: Effect.gen(function* () {
-    const d1 = yield* ConfigEx.object("D1").pipe(
-      Config.mapOrFail((object) =>
-        "prepare" in object &&
-        typeof object.prepare === "function" &&
-        "batch" in object &&
-        typeof object.batch === "function"
-          ? Either.right(object as D1Database)
-          : Either.left(
-              ConfigError.InvalidData(
-                [],
-                `Expected a D1 database but received ${object}`,
-              ),
-            ),
-      ),
-    );
-    const tryPromise = <A>(evaluate: (signal: AbortSignal) => PromiseLike<A>) =>
-      Effect.tryPromise(evaluate).pipe(
-        Effect.mapError((error) =>
-          Cause.isUnknownException(error) &&
-          Predicate.isError(error.error) &&
-          error.error.message.startsWith("D1_")
-            ? new D1Error({ message: error.error.message, cause: error.error })
-            : error,
-        ),
-        Effect.tapError((error) => Effect.log(error)),
-        Effect.retry({
-          while: (error) =>
-            Predicate.isTagged(error, "D1Error") &&
-            !["SQLITE_CONSTRAINT", "SQLITE_ERROR", "SQLITE_MISMATCH"].some(
-              (pattern) => error.message.includes(pattern),
-            ),
-          times: 2,
-          schedule: Schedule.exponential("1 second"),
-        }),
-      );
-    return {
-      prepare: (query: string) => d1.prepare(query),
-      batch: (statements: D1PreparedStatement[]) =>
-        tryPromise(() => d1.batch(statements)),
-      run: (statement: D1PreparedStatement) =>
-        tryPromise(() => statement.run()),
-      first: <T>(statement: D1PreparedStatement) =>
-        tryPromise(() => statement.first<T>()),
-    };
-  }),
-}) {}
-```
-
-## What cerr D1.ts Does
-
-1. **Gets D1Database from env** via `ConfigEx.object('D1')` -- pulls the `D1` binding from Cloudflare env, validates it has `prepare`/`batch` methods
-2. **Wraps D1 operations** with `tryPromise` that:
-   - Maps Cloudflare D1 errors (prefixed `D1_`) to typed `D1Error`
-   - Logs errors via `Effect.tapError`
-   - Retries transient errors (exponential backoff, 2 retries) -- skips `SQLITE_CONSTRAINT`, `SQLITE_ERROR`, `SQLITE_MISMATCH`
-3. **Exposes**: `prepare`, `batch`, `run`, `first`
-
-## Effect 3 -> Effect 4 Translation Issues
-
-### 1. `Effect.Service` -> `ServiceMap.Service`
-
-cerr uses Effect 3's `Effect.Service<D1>()('D1', { accessors: true, effect: ... })`.
-
-Effect 4 equivalent: `ServiceMap.Service` with `make` option, then explicit `Layer.effect`.
-
-```ts
-// Effect 3
-class D1 extends Effect.Service<D1>()('D1', {
-  accessors: true,
-  effect: Effect.gen(function* () { ... })
-}) {}
-// D1.Default auto-generated layer
-
-// Effect 4
-class D1 extends ServiceMap.Service<D1, D1Shape>()('D1', {
-  make: Effect.gen(function* () { ... })
-}) {
-  static layer = Layer.effect(this, this.make).pipe(
-    Layer.provide(/* dependencies */)
-  )
-}
-```
-
-Key differences:
-
-- `accessors: true` removed -- use `D1.use(d1 => d1.prepare(...))` or `yield* D1` in generators
-- `effect` option -> `make` option
-- No auto-generated `.Default` layer -- define `.layer` explicitly
-- `dependencies` option removed -- use `Layer.provide()`
-
-### 2. `ConfigEx.object('D1')` -> `CloudflareEnv` Service
-
-cerr uses `ConfigEx` to pull the D1 binding from Cloudflare env via Config system. We don't have `ConfigEx`. Our codebase already has:
-
-```ts
-// src/lib/effect-services.ts
-export const CloudflareEnv = ServiceMap.Service<Env>("CloudflareEnv");
-```
-
-Instead of pulling D1 from Config, we yield CloudflareEnv and access `.D1` directly:
-
-```ts
-// Effect 3 (cerr)
-const d1 = yield* ConfigEx.object('D1').pipe(Config.mapOrFail(...))
-
-// Effect 4 (ours)
-const env = yield* CloudflareEnv
-const d1 = env.D1
-```
-
-This is simpler and fully typed -- `Env` from `worker-configuration.d.ts` already has `D1: D1Database`.
-
-### 3. Error Handling Changes
-
-| Effect 3                          | Effect 4                                                |
-| --------------------------------- | ------------------------------------------------------- |
-| `Cause.isUnknownException(error)` | TBD -- check if `Cause.isUnknownException` still exists |
-| `Effect.catchAll`                 | `Effect.catch`                                          |
-| `Effect.catchAllCause`            | `Effect.catchCause`                                     |
-| `Data.TaggedError`                | Still exists in Effect 4                                |
-| `Predicate.isTagged`              | Still exists                                            |
-| `Schedule.exponential`            | Still exists                                            |
-| `Effect.retry`                    | Still exists                                            |
-
-### 4. `dual` from `effect/Function`
-
-Still exists in Effect 4 -- no change needed for the `bind` helper.
-
-## Proposed Effect 4 D1 Service
-
-### Approach A: Lightweight (match cerr's surface area)
-
-Keeps the same simple API (`prepare`, `batch`, `run`, `first`) but uses our `CloudflareEnv` service.
-
-```ts
-import { Data, Effect, Layer, Predicate, Schedule, ServiceMap } from "effect";
+import { CloudflareEnv } from "./effect-services";
 
 export class D1Error extends Data.TaggedError("D1Error")<{
   readonly message: string;
@@ -181,133 +80,233 @@ interface D1Shape {
   ) => Effect.Effect<T | null, D1Error>;
 }
 
-class D1 extends ServiceMap.Service<D1, D1Shape>()("D1", {
-  make: Effect.gen(function* () {
-    const env = yield* CloudflareEnv;
-    const d1 = env.D1;
+export const D1 = ServiceMap.Service<D1Shape>("D1");
 
-    const tryD1 = <A>(evaluate: () => Promise<A>) =>
-      Effect.tryPromise({ try: evaluate, catch: (e) => e }).pipe(
-        Effect.mapError((error) =>
-          error instanceof Error && error.message.startsWith("D1_")
-            ? new D1Error({ message: error.message, cause: error })
-            : new D1Error({
-                message: String(error),
-                cause:
-                  error instanceof Error ? error : new Error(String(error)),
-              }),
-        ),
-        Effect.tapError((error) => Effect.log(error)),
-        Effect.retry({
-          while: (error) =>
-            !["SQLITE_CONSTRAINT", "SQLITE_ERROR", "SQLITE_MISMATCH"].some(
-              (p) => error.message.includes(p),
-            ),
-          times: 2,
-          schedule: Schedule.exponential("1 second"),
-        }),
-      );
+const NON_RETRYABLE = [
+  "SQLITE_CONSTRAINT",
+  "SQLITE_ERROR",
+  "SQLITE_MISMATCH",
+] as const;
 
-    return D1.of({
-      prepare: (query) => d1.prepare(query),
-      batch: (statements) => tryD1(() => d1.batch(statements)),
-      run: (statement) => tryD1(() => statement.run()),
-      first: <T>(statement: D1PreparedStatement) =>
-        tryD1(() => statement.first<T>()),
-    });
-  }),
-}) {
-  static layer = Layer.effect(this, this.make);
-  // CloudflareEnv must be provided when this layer is built
-}
+const tryD1 = <A>(evaluate: () => Promise<A>) =>
+  Effect.tryPromise(evaluate).pipe(
+    Effect.mapError((error) => {
+      const cause = Cause.isUnknownError(error) ? error.cause : error;
+      const underlying =
+        cause instanceof Error ? cause : new Error(String(cause));
+      return new D1Error({ message: underlying.message, cause: underlying });
+    }),
+    Effect.tapError((error) => Effect.log(error)),
+    Effect.retry({
+      while: (error) => !NON_RETRYABLE.some((p) => error.message.includes(p)),
+      times: 2,
+      schedule: Schedule.exponential("1 second"),
+    }),
+  );
+
+export const bind = dual<
+  (
+    ...values: unknown[]
+  ) => <E, R>(
+    self: Effect.Effect<D1PreparedStatement, E, R>,
+  ) => Effect.Effect<D1PreparedStatement, E, R>,
+  <E, R>(
+    ...args: [Effect.Effect<D1PreparedStatement, E, R>, ...unknown[]]
+  ) => Effect.Effect<D1PreparedStatement, E, R>
+>(
+  (args) => Effect.isEffect(args[0]),
+  (self, ...values) => Effect.map(self, (stmt) => stmt.bind(...values)),
+);
 ```
 
-Usage:
+## Approach A: `provideServiceEffect` in `makeRunEffect`
+
+D1's `make` is an Effect that `yield*`s CloudflareEnv. The runner wraps every program with `provideServiceEffect` so D1 is transparently available.
 
 ```ts
+// src/lib/d1.ts (additional export)
+export const makeD1 = Effect.gen(function* () {
+  const { D1: d1 } = yield* CloudflareEnv;
+  return D1.of({
+    prepare: (query) => d1.prepare(query),
+    batch: (statements) => tryD1(() => d1.batch(statements)),
+    run: (statement) => tryD1(() => statement.run()),
+    first: <T>(statement: D1PreparedStatement) =>
+      tryD1(() => statement.first<T>()),
+  });
+});
+```
+
+```ts
+// src/lib/effect-services.ts
+import { D1, makeD1 } from "./d1";
+
+export const makeRunEffect = (env: Env) => {
+  const baseRun = Effect.runPromiseWith(
+    ServiceMap.make(CloudflareEnv, env).pipe(
+      ServiceMap.add(
+        ConfigProvider.ConfigProvider,
+        ConfigProvider.fromUnknown(env),
+      ),
+    ),
+  );
+  return <A, E>(effect: Effect.Effect<A, E /* D1 | CloudflareEnv | ... */>) =>
+    baseRun(effect.pipe(Effect.provideServiceEffect(D1, makeD1)));
+};
+```
+
+```ts
+// Consumer usage -- D1 just works
 const program = Effect.gen(function* () {
   const d1 = yield* D1;
   const stmt = d1.prepare("select * from User where id = ?").bind(userId);
-  const user = yield* d1.first<{ id: string; email: string }>(stmt);
-  return user;
+  return yield* d1.first<{ id: string; email: string }>(stmt);
+});
+runEffect(program); // D1 provided automatically
+```
+
+**How it works**: `provideServiceEffect(D1, makeD1)` says "when something needs D1, run `makeD1` to build it". `makeD1` yields CloudflareEnv which is in the base ServiceMap. The `provideServiceEffect` call eliminates `D1` from the `R` type of the effect, so `baseRun` (which has CloudflareEnv) can satisfy the remaining requirement.
+
+**Tradeoffs**:
+
+- D1 is available as a proper service tag -- consumers `yield* D1`
+- D1 `yield*`s CloudflareEnv (proper dependency)
+- D1 is rebuilt on every `runEffect` call (no caching). Fine -- construction is cheap (just wrapping `env.D1`).
+- Each new dependent service needs another `provideServiceEffect` in `makeRunEffect`
+- Type signature of `makeRunEffect` return gets wider as services are added
+
+<!-- annotate: A -->
+
+## Approach B: `ManagedRuntime` + Layer
+
+Uses the official `Layer` -> `ManagedRuntime` pattern. D1 is a layer that depends on CloudflareEnv layer.
+
+```ts
+// src/lib/d1.ts (additional export)
+export const makeD1 = Effect.gen(function* () {
+  const { D1: d1 } = yield* CloudflareEnv;
+  return D1.of({
+    prepare: (query) => d1.prepare(query),
+    batch: (statements) => tryD1(() => d1.batch(statements)),
+    run: (statement) => tryD1(() => statement.run()),
+    first: <T>(statement: D1PreparedStatement) =>
+      tryD1(() => statement.first<T>()),
+  });
 });
 
-// Run with:
-runEffect(program.pipe(Effect.provide(D1.layer)));
+export const D1Layer = Layer.effect(D1)(makeD1);
 ```
-
-### Approach B: Use official @effect/sql-d1 pattern
-
-Check if supports batch. If not, reduce this section saying we're not using due to no batch support.
-
-The official `D1Client` from `refs/effect4/packages/sql/d1/src/D1Client.ts` provides:
-
-- `SqlClient` interface with prepared statement caching
-- Column name transforms
-- Span attributes for tracing
-- `Reactivity` integration
-
-BUT: it requires `effect/unstable/sql/*` modules which may not be available in `effect@4.0.0-beta.5`. Also heavier -- we'd need to adopt the full `SqlClient` interface.
 
 ```ts
-import * as D1Client from "effect/unstable/sql-d1/D1Client";
+// src/lib/effect-services.ts
+import { Layer, ManagedRuntime } from "effect";
+import { D1Layer } from "./d1";
 
-const D1Layer = D1Client.layer({ db: env.D1 });
+export const makeRunEffect = (env: Env) => {
+  const appLayer = Layer.mergeAll(
+    Layer.succeed(CloudflareEnv)(env),
+    D1Layer,
+    Layer.succeed(ConfigProvider.ConfigProvider)(
+      ConfigProvider.fromUnknown(env),
+    ),
+  ).pipe(Layer.provide(Layer.succeed(CloudflareEnv)(env)));
+  const runtime = ManagedRuntime.make(appLayer);
+  return runtime.runPromise;
+};
 ```
-
-### Recommendation: Approach A
-
-- Matches cerr's surface area which is what the codebase actually needs
-- Simpler, no dependency on unstable sql modules
-- Uses our existing `CloudflareEnv` service directly
-- Easy to extend later
-
-## Integration with Existing Codebase
-
-### Current D1 usage (non-Effect)
 
 ```ts
-// worker.ts
-const d1SessionService = createD1SessionService({ d1: env.D1, request, ... })
-const repository = createRepository({ db: d1SessionService.getSession() })
+// Consumer usage -- identical
+const program = Effect.gen(function* () {
+  const d1 = yield* D1;
+  return yield* d1.first<{ id: string; email: string }>(stmt);
+});
+runEffect(program);
 ```
 
-### With Effect D1 service
+**Tradeoffs**:
 
-The D1 service provides effectful wrappers around raw D1 calls. It doesn't replace the repository pattern but could be used inside repository functions for retry/error handling.
+- D1 is in the ServiceMap, proper service tag, `yield*`s CloudflareEnv
+- Layer caches D1 construction (only built once per runtime)
+- ManagedRuntime provides `runPromise`, `runSync`, `runFork` etc.
+- ManagedRuntime has `dispose()` for cleanup (relevant for scoped resources)
+- Adding services = adding layers, composable via `Layer.mergeAll` / `Layer.provide`
+- More boilerplate than Approach A
+- Involves Layer (which you said you wanted to avoid)
 
-Two integration paths:
+<!-- annotate: B -->
 
-**Path 1: D1 service inside existing repository** -- Repository functions use `yield*` D1 service internally. Repository itself becomes an Effect service.
+## Approach C: Eager pure build (no `yield*` on CloudflareEnv)
 
-**Path 2: D1 service alongside repository** -- New effectful code paths use D1 service directly. Existing repository stays as-is.
+D1 construction is actually pure -- `env.D1` is a synchronous binding. Build D1Shape directly from `D1Database` without needing an Effect.
 
-## Open Questions
+```ts
+// src/lib/d1.ts (additional export -- pure function, not an Effect)
+export const makeD1Shape = (d1: D1Database): D1Shape => ({
+  prepare: (query) => d1.prepare(query),
+  batch: (statements) => tryD1(() => d1.batch(statements)),
+  run: (statement) => tryD1(() => statement.run()),
+  first: <T>(statement: D1PreparedStatement) =>
+    tryD1(() => statement.first<T>()),
+});
+```
 
-<!-- annotate below -->
+```ts
+// src/lib/effect-services.ts
+import { D1, makeD1Shape } from "./d1";
 
-1. Do we want D1 session (bookmark) support in the Effect D1 service? Currently `d1-session-service.ts` wraps D1 with `withSession(bookmark)` for read-after-write consistency.
+export const makeRunEffect = (env: Env) =>
+  Effect.runPromiseWith(
+    ServiceMap.make(CloudflareEnv, env)
+      .pipe(ServiceMap.add(D1, makeD1Shape(env.D1)))
+      .pipe(
+        ServiceMap.add(
+          ConfigProvider.ConfigProvider,
+          ConfigProvider.fromUnknown(env),
+        ),
+      ),
+  );
+```
 
-Defer
+```ts
+// Consumer usage -- identical
+const program = Effect.gen(function* () {
+  const d1 = yield* D1;
+  return yield* d1.first<{ id: string; email: string }>(stmt);
+});
+runEffect(program);
+```
 
-2. Should the D1 service return raw `D1Result` types or decode with Effect Schema?
+**Tradeoffs**:
 
-Raw
+- D1 is in the ServiceMap, proper service tag, consumers `yield* D1`
+- Simplest -- no Layer, no `provideServiceEffect` chain
+- D1 does NOT `yield*` CloudflareEnv -- takes `D1Database` directly as a function arg
+- `makeRunEffect` passes `env.D1` explicitly, coupling the wiring site to knowing env shape
+- Works well when D1 construction is trivially derived from env (which it is)
+- If D1 construction later needs effectful setup (connection pooling, etc.), would need to switch to A or B
 
-3. Do we want the `bind` dual helper from cerr? It lets you pipe bind values:
+<!-- annotate: C -->
 
-   ```ts
-   yield *
-     D1.prepare("select * from User where id = ?").pipe(D1Ns.bind(userId));
-   ```
+## `bind` Helper
 
-Keep
+Kept from cerr. Enables piped bind syntax:
 
-4. Should `tryD1` error mapping be more granular? cerr checks `Cause.isUnknownException` which may not exist in Effect 4.
+```ts
+// import * as D1Ns from './D1'
+// import { D1 } from './D1'
+yield *
+  D1.prepare("select userId, email from users where userId = ?").pipe(
+    D1Ns.bind(3),
+  );
+```
 
-Check if that exists in Effect 4. We'll probably need to iterate on tryD1 later.
+Note: `D1.prepare(...)` returns a plain `D1PreparedStatement` (not an Effect), so the `bind` dual wraps an `Effect<D1PreparedStatement>`. This is useful when chaining effectful operations but for simple cases, `d1.prepare(query).bind(value)` works directly.
 
-5. Layer wiring: should `D1.layer` be pre-provided with `CloudflareEnv` in `makeRunEffect`, or provided at call site?
+## File Structure
 
-How can we do this without layer? Prefer to use CloudflareEnv service directly to get 
-D1 binding.
+```
+src/lib/
+  d1.ts                  # D1Error, D1 service tag, D1Shape, tryD1, bind, + approach-specific exports
+  effect-services.ts     # CloudflareEnv, makeRunEffect (wires D1 into ServiceMap)
+```
