@@ -31,6 +31,7 @@ import { Route as AppOrganizationIdInvitationsRouteImport } from './routes/app.$
 import { Route as AppOrganizationIdInspectorRouteImport } from './routes/app.$organizationId.inspector'
 import { Route as AppOrganizationIdGoogleRouteImport } from './routes/app.$organizationId.google'
 import { Route as AppOrganizationIdEffectRouteImport } from './routes/app.$organizationId.effect'
+import { Route as AppOrganizationIdD1RouteImport } from './routes/app.$organizationId.d1'
 import { Route as AppOrganizationIdChatRouteImport } from './routes/app.$organizationId.chat'
 import { Route as AppOrganizationIdBillingRouteImport } from './routes/app.$organizationId.billing'
 import { Route as AppOrganizationIdAgentRouteImport } from './routes/app.$organizationId.agent'
@@ -152,6 +153,11 @@ const AppOrganizationIdEffectRoute = AppOrganizationIdEffectRouteImport.update({
   path: '/effect',
   getParentRoute: () => AppOrganizationIdRoute,
 } as any)
+const AppOrganizationIdD1Route = AppOrganizationIdD1RouteImport.update({
+  id: '/d1',
+  path: '/d1',
+  getParentRoute: () => AppOrganizationIdRoute,
+} as any)
 const AppOrganizationIdChatRoute = AppOrganizationIdChatRouteImport.update({
   id: '/chat',
   path: '/chat',
@@ -209,6 +215,7 @@ export interface FileRoutesByFullPath {
   '/app/$organizationId/agent': typeof AppOrganizationIdAgentRoute
   '/app/$organizationId/billing': typeof AppOrganizationIdBillingRoute
   '/app/$organizationId/chat': typeof AppOrganizationIdChatRoute
+  '/app/$organizationId/d1': typeof AppOrganizationIdD1Route
   '/app/$organizationId/effect': typeof AppOrganizationIdEffectRoute
   '/app/$organizationId/google': typeof AppOrganizationIdGoogleRoute
   '/app/$organizationId/inspector': typeof AppOrganizationIdInspectorRoute
@@ -236,6 +243,7 @@ export interface FileRoutesByTo {
   '/app/$organizationId/agent': typeof AppOrganizationIdAgentRoute
   '/app/$organizationId/billing': typeof AppOrganizationIdBillingRoute
   '/app/$organizationId/chat': typeof AppOrganizationIdChatRoute
+  '/app/$organizationId/d1': typeof AppOrganizationIdD1Route
   '/app/$organizationId/effect': typeof AppOrganizationIdEffectRoute
   '/app/$organizationId/google': typeof AppOrganizationIdGoogleRoute
   '/app/$organizationId/inspector': typeof AppOrganizationIdInspectorRoute
@@ -268,6 +276,7 @@ export interface FileRoutesById {
   '/app/$organizationId/agent': typeof AppOrganizationIdAgentRoute
   '/app/$organizationId/billing': typeof AppOrganizationIdBillingRoute
   '/app/$organizationId/chat': typeof AppOrganizationIdChatRoute
+  '/app/$organizationId/d1': typeof AppOrganizationIdD1Route
   '/app/$organizationId/effect': typeof AppOrganizationIdEffectRoute
   '/app/$organizationId/google': typeof AppOrganizationIdGoogleRoute
   '/app/$organizationId/inspector': typeof AppOrganizationIdInspectorRoute
@@ -300,6 +309,7 @@ export interface FileRouteTypes {
     | '/app/$organizationId/agent'
     | '/app/$organizationId/billing'
     | '/app/$organizationId/chat'
+    | '/app/$organizationId/d1'
     | '/app/$organizationId/effect'
     | '/app/$organizationId/google'
     | '/app/$organizationId/inspector'
@@ -327,6 +337,7 @@ export interface FileRouteTypes {
     | '/app/$organizationId/agent'
     | '/app/$organizationId/billing'
     | '/app/$organizationId/chat'
+    | '/app/$organizationId/d1'
     | '/app/$organizationId/effect'
     | '/app/$organizationId/google'
     | '/app/$organizationId/inspector'
@@ -358,6 +369,7 @@ export interface FileRouteTypes {
     | '/app/$organizationId/agent'
     | '/app/$organizationId/billing'
     | '/app/$organizationId/chat'
+    | '/app/$organizationId/d1'
     | '/app/$organizationId/effect'
     | '/app/$organizationId/google'
     | '/app/$organizationId/inspector'
@@ -538,6 +550,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AppOrganizationIdEffectRouteImport
       parentRoute: typeof AppOrganizationIdRoute
     }
+    '/app/$organizationId/d1': {
+      id: '/app/$organizationId/d1'
+      path: '/d1'
+      fullPath: '/app/$organizationId/d1'
+      preLoaderRoute: typeof AppOrganizationIdD1RouteImport
+      parentRoute: typeof AppOrganizationIdRoute
+    }
     '/app/$organizationId/chat': {
       id: '/app/$organizationId/chat'
       path: '/chat'
@@ -624,6 +643,7 @@ interface AppOrganizationIdRouteChildren {
   AppOrganizationIdAgentRoute: typeof AppOrganizationIdAgentRoute
   AppOrganizationIdBillingRoute: typeof AppOrganizationIdBillingRoute
   AppOrganizationIdChatRoute: typeof AppOrganizationIdChatRoute
+  AppOrganizationIdD1Route: typeof AppOrganizationIdD1Route
   AppOrganizationIdEffectRoute: typeof AppOrganizationIdEffectRoute
   AppOrganizationIdGoogleRoute: typeof AppOrganizationIdGoogleRoute
   AppOrganizationIdInspectorRoute: typeof AppOrganizationIdInspectorRoute
@@ -638,6 +658,7 @@ const AppOrganizationIdRouteChildren: AppOrganizationIdRouteChildren = {
   AppOrganizationIdAgentRoute: AppOrganizationIdAgentRoute,
   AppOrganizationIdBillingRoute: AppOrganizationIdBillingRoute,
   AppOrganizationIdChatRoute: AppOrganizationIdChatRoute,
+  AppOrganizationIdD1Route: AppOrganizationIdD1Route,
   AppOrganizationIdEffectRoute: AppOrganizationIdEffectRoute,
   AppOrganizationIdGoogleRoute: AppOrganizationIdGoogleRoute,
   AppOrganizationIdInspectorRoute: AppOrganizationIdInspectorRoute,
