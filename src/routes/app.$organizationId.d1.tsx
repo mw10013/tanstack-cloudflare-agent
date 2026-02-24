@@ -3,22 +3,20 @@ import { createServerFn } from "@tanstack/react-start";
 import { Effect } from "effect";
 import { D1 } from "@/lib/d1";
 
-interface UserRow {
-  readonly id: string;
-  readonly name: string;
-  readonly email: string;
-  readonly role: string;
-}
-
 const getLoaderData = createServerFn({ method: "GET" }).handler(
   ({ context: { runEffect } }) =>
     runEffect(
       Effect.gen(function* () {
         const d1 = yield* D1;
         const stmt = d1.prepare("select id, name, email, role from User");
-        const result = yield* d1.run(stmt);
+        const result = yield* d1.run<{
+          id: string;
+          name: string;
+          email: string;
+          role: string;
+        }>(stmt);
         return {
-          rows: result.results as UserRow[],
+          rows: result.results,
           rowsRead: result.meta.rows_read,
           duration: result.meta.duration,
         };

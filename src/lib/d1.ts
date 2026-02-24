@@ -9,12 +9,12 @@ export class D1Error extends Data.TaggedError("D1Error")<{
 
 interface D1Shape {
   readonly prepare: (query: string) => D1PreparedStatement;
-  readonly batch: (
+  readonly batch: <T = Record<string, unknown>>(
     statements: D1PreparedStatement[],
-  ) => Effect.Effect<D1Result[], D1Error>;
-  readonly run: (
+  ) => Effect.Effect<D1Result<T>[], D1Error>;
+  readonly run: <T = Record<string, unknown>>(
     statement: D1PreparedStatement,
-  ) => Effect.Effect<D1Result, D1Error>;
+  ) => Effect.Effect<D1Result<T>, D1Error>;
   readonly first: <T>(
     statement: D1PreparedStatement,
   ) => Effect.Effect<T | null, D1Error>;
@@ -51,9 +51,10 @@ const make = Effect.gen(function* () {
   const { D1: d1 } = yield* CloudflareEnv;
   return {
     prepare: (query: string) => d1.prepare(query),
-    batch: (statements: D1PreparedStatement[]) =>
-      tryD1(() => d1.batch(statements)),
-    run: (statement: D1PreparedStatement) => tryD1(() => statement.run()),
+    batch: <T = Record<string, unknown>>(statements: D1PreparedStatement[]) =>
+      tryD1(() => d1.batch<T>(statements)),
+    run: <T = Record<string, unknown>>(statement: D1PreparedStatement) =>
+      tryD1(() => statement.run<T>()),
     first: <T>(statement: D1PreparedStatement) =>
       tryD1(() => statement.first<T>()),
   } satisfies D1Shape;
