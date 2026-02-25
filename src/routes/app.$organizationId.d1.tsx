@@ -1,7 +1,7 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { createServerFn } from "@tanstack/react-start";
 import { Effect } from "effect";
-import { D1 } from "@/lib/d1";
+import { D1 } from "@/lib/D1";
 
 const getLoaderData = createServerFn({ method: "GET" }).handler(
   ({ context: { runEffect } }) =>

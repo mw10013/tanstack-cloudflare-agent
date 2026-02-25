@@ -1,5 +1,5 @@
 import { ConfigProvider, Effect, Layer, ServiceMap } from "effect";
-import { D1 } from "./d1";
+import { D1 } from "./D1";
 
 export const CloudflareEnv = ServiceMap.Service<Env>("CloudflareEnv");
 

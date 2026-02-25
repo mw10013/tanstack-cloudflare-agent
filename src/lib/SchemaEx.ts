@@ -1,6 +1,10 @@
 import { Schema, SchemaGetter, Struct } from "effect";
 
-// refs/effect4/packages/effect/SCHEMA.md:7262
+/**
+ * Extract a single field from a struct schema, returning the unwrapped value.
+ *
+ * refs/effect4/packages/effect/SCHEMA.md:7262
+ */
 const pluck =
   <P extends PropertyKey>(key: P) =>
   <S extends Schema.Top>(
@@ -15,6 +19,10 @@ const pluck =
       }),
     );
 
+/**
+ * Schema for D1 rows shaped `{ data: string }` (e.g. from `json_group_array`/`json_object` queries).
+ * Extracts the `data` column, parses the JSON string, and validates against `DataSchema`.
+ */
 export const DataFromResult = <A>(DataSchema: Schema.Schema<A>) =>
   Schema.Struct({ data: Schema.String }).pipe(
     pluck("data"),
