@@ -20,7 +20,22 @@ interface D1Shape {
   ) => Effect.Effect<T | null, D1Error>;
 }
 
-export const D1 = ServiceMap.Service<D1Shape>("D1");
+export class D1 extends ServiceMap.Service<D1, D1Shape>()("D1", {
+  make: Effect.gen(function* () {
+    const { D1: d1 } = yield* CloudflareEnv;
+    return {
+      prepare: (query: string) => d1.prepare(query),
+      batch: <T = Record<string, unknown>>(statements: D1PreparedStatement[]) =>
+        tryD1(() => d1.batch<T>(statements)),
+      run: <T = Record<string, unknown>>(statement: D1PreparedStatement) =>
+        tryD1(() => statement.run<T>()),
+      first: <T>(statement: D1PreparedStatement) =>
+        tryD1(() => statement.first<T>()),
+    } satisfies D1Shape;
+  }),
+}) {
+  static layer = Layer.effect(this, this.make);
+}
 
 const NON_RETRYABLE = [
   "SQLITE_CONSTRAINT",
@@ -47,20 +62,7 @@ const tryD1 = <A>(evaluate: () => Promise<A>) =>
     }),
   );
 
-const make = Effect.gen(function* () {
-  const { D1: d1 } = yield* CloudflareEnv;
-  return {
-    prepare: (query: string) => d1.prepare(query),
-    batch: <T = Record<string, unknown>>(statements: D1PreparedStatement[]) =>
-      tryD1(() => d1.batch<T>(statements)),
-    run: <T = Record<string, unknown>>(statement: D1PreparedStatement) =>
-      tryD1(() => statement.run<T>()),
-    first: <T>(statement: D1PreparedStatement) =>
-      tryD1(() => statement.first<T>()),
-  } satisfies D1Shape;
-});
-
-export const layer = Layer.effect(D1)(make);
+export const layer = D1.layer;
 
 export const bind = dual<
   (
