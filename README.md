@@ -164,6 +164,13 @@ npm install -g @openai/codex
 
 ## Effect
 
+```
+https://discord.com/channels/795981131316985866/1474166367530909958
+
+Effect.services + Effect.runPromiseWith
+Or use a FiberSet
+```
+
 ```*:Okay, imagine you have a toy box (your program), and you need helpers to do things for you — like a robot that fetches snacks or a teddy bear that tells you stories. In the old version (v3), there were four different ways to ask for a helper: Context.Tag, Context.GenericTag, Effect.Tag, and Effect.Service. That's confusing — like having four different doors into the same room.
 So in v4, they knocked down all four doors and built one nice door: ServiceMap.Service. Now there's only one way to make a helper, and everyone uses the same door.
 Here's what else changed, in kid terms:

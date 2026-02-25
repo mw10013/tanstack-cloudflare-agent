@@ -2,6 +2,8 @@ import { Cause, Data, Effect, Layer, Schedule, ServiceMap } from "effect";
 import { dual } from "effect/Function";
 import { CloudflareEnv } from "./effect-services";
 
+// https://gist.github.com/rxliuli/be31cbded41ef7eac6ae0da9070c8ef8
+
 export class D1Error extends Data.TaggedError("D1Error")<{
   readonly message: string;
   readonly cause: Error;
