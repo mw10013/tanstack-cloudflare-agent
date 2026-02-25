@@ -9,20 +9,7 @@ export class D1Error extends Data.TaggedError("D1Error")<{
   readonly cause: Error;
 }> {}
 
-interface D1Shape {
-  readonly prepare: (query: string) => D1PreparedStatement;
-  readonly batch: <T = Record<string, unknown>>(
-    statements: D1PreparedStatement[],
-  ) => Effect.Effect<D1Result<T>[], D1Error>;
-  readonly run: <T = Record<string, unknown>>(
-    statement: D1PreparedStatement,
-  ) => Effect.Effect<D1Result<T>, D1Error>;
-  readonly first: <T>(
-    statement: D1PreparedStatement,
-  ) => Effect.Effect<T | null, D1Error>;
-}
-
-export class D1 extends ServiceMap.Service<D1, D1Shape>()("D1", {
+export class D1 extends ServiceMap.Service<D1>()("D1", {
   make: Effect.gen(function* () {
     const { D1: d1 } = yield* CloudflareEnv;
     return {
@@ -33,7 +20,7 @@ export class D1 extends ServiceMap.Service<D1, D1Shape>()("D1", {
         tryD1(() => statement.run<T>()),
       first: <T>(statement: D1PreparedStatement) =>
         tryD1(() => statement.first<T>()),
-    } satisfies D1Shape;
+    };
   }),
 }) {
   static layer = Layer.effect(this, this.make);
