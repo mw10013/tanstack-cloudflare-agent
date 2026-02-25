@@ -1,5 +1,5 @@
 import { ConfigProvider, Effect, Layer, ServiceMap } from "effect";
-import * as D1Mod from "./d1";
+import { D1 } from "./d1";
 
 export const CloudflareEnv = ServiceMap.Service<Env>("CloudflareEnv");
 
@@ -9,7 +9,7 @@ export const Greeting = ServiceMap.Service<{
 
 const makeAppLayer = (env: Env) =>
   Layer.provideMerge(
-    D1Mod.layer,
+    D1.layer,
     Layer.succeedServices(
       ServiceMap.make(CloudflareEnv, env)
         .pipe(

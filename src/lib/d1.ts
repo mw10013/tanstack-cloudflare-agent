@@ -62,8 +62,6 @@ const tryD1 = <A>(evaluate: () => Promise<A>) =>
     }),
   );
 
-export const layer = D1.layer;
-
 export const bind = dual<
   (
     ...values: unknown[]
