@@ -26,6 +26,7 @@ import { Route as MktPricingRouteImport } from './routes/_mkt.pricing'
 import { Route as AppOrganizationIdIndexRouteImport } from './routes/app.$organizationId.index'
 import { Route as AppOrganizationIdWorkflowRouteImport } from './routes/app.$organizationId.workflow'
 import { Route as AppOrganizationIdUploadRouteImport } from './routes/app.$organizationId.upload'
+import { Route as AppOrganizationIdStripeRouteImport } from './routes/app.$organizationId.stripe'
 import { Route as AppOrganizationIdRepositoryRouteImport } from './routes/app.$organizationId.repository'
 import { Route as AppOrganizationIdMembersRouteImport } from './routes/app.$organizationId.members'
 import { Route as AppOrganizationIdInvitationsRouteImport } from './routes/app.$organizationId.invitations'
@@ -124,6 +125,11 @@ const AppOrganizationIdWorkflowRoute =
 const AppOrganizationIdUploadRoute = AppOrganizationIdUploadRouteImport.update({
   id: '/upload',
   path: '/upload',
+  getParentRoute: () => AppOrganizationIdRoute,
+} as any)
+const AppOrganizationIdStripeRoute = AppOrganizationIdStripeRouteImport.update({
+  id: '/stripe',
+  path: '/stripe',
   getParentRoute: () => AppOrganizationIdRoute,
 } as any)
 const AppOrganizationIdRepositoryRoute =
@@ -229,6 +235,7 @@ export interface FileRoutesByFullPath {
   '/app/$organizationId/invitations': typeof AppOrganizationIdInvitationsRoute
   '/app/$organizationId/members': typeof AppOrganizationIdMembersRoute
   '/app/$organizationId/repository': typeof AppOrganizationIdRepositoryRoute
+  '/app/$organizationId/stripe': typeof AppOrganizationIdStripeRoute
   '/app/$organizationId/upload': typeof AppOrganizationIdUploadRoute
   '/app/$organizationId/workflow': typeof AppOrganizationIdWorkflowRoute
   '/app/$organizationId/': typeof AppOrganizationIdIndexRoute
@@ -258,6 +265,7 @@ export interface FileRoutesByTo {
   '/app/$organizationId/invitations': typeof AppOrganizationIdInvitationsRoute
   '/app/$organizationId/members': typeof AppOrganizationIdMembersRoute
   '/app/$organizationId/repository': typeof AppOrganizationIdRepositoryRoute
+  '/app/$organizationId/stripe': typeof AppOrganizationIdStripeRoute
   '/app/$organizationId/upload': typeof AppOrganizationIdUploadRoute
   '/app/$organizationId/workflow': typeof AppOrganizationIdWorkflowRoute
   '/app/$organizationId': typeof AppOrganizationIdIndexRoute
@@ -292,6 +300,7 @@ export interface FileRoutesById {
   '/app/$organizationId/invitations': typeof AppOrganizationIdInvitationsRoute
   '/app/$organizationId/members': typeof AppOrganizationIdMembersRoute
   '/app/$organizationId/repository': typeof AppOrganizationIdRepositoryRoute
+  '/app/$organizationId/stripe': typeof AppOrganizationIdStripeRoute
   '/app/$organizationId/upload': typeof AppOrganizationIdUploadRoute
   '/app/$organizationId/workflow': typeof AppOrganizationIdWorkflowRoute
   '/app/$organizationId/': typeof AppOrganizationIdIndexRoute
@@ -326,6 +335,7 @@ export interface FileRouteTypes {
     | '/app/$organizationId/invitations'
     | '/app/$organizationId/members'
     | '/app/$organizationId/repository'
+    | '/app/$organizationId/stripe'
     | '/app/$organizationId/upload'
     | '/app/$organizationId/workflow'
     | '/app/$organizationId/'
@@ -355,6 +365,7 @@ export interface FileRouteTypes {
     | '/app/$organizationId/invitations'
     | '/app/$organizationId/members'
     | '/app/$organizationId/repository'
+    | '/app/$organizationId/stripe'
     | '/app/$organizationId/upload'
     | '/app/$organizationId/workflow'
     | '/app/$organizationId'
@@ -388,6 +399,7 @@ export interface FileRouteTypes {
     | '/app/$organizationId/invitations'
     | '/app/$organizationId/members'
     | '/app/$organizationId/repository'
+    | '/app/$organizationId/stripe'
     | '/app/$organizationId/upload'
     | '/app/$organizationId/workflow'
     | '/app/$organizationId/'
@@ -526,6 +538,13 @@ declare module '@tanstack/react-router' {
       path: '/upload'
       fullPath: '/app/$organizationId/upload'
       preLoaderRoute: typeof AppOrganizationIdUploadRouteImport
+      parentRoute: typeof AppOrganizationIdRoute
+    }
+    '/app/$organizationId/stripe': {
+      id: '/app/$organizationId/stripe'
+      path: '/stripe'
+      fullPath: '/app/$organizationId/stripe'
+      preLoaderRoute: typeof AppOrganizationIdStripeRouteImport
       parentRoute: typeof AppOrganizationIdRoute
     }
     '/app/$organizationId/repository': {
@@ -670,6 +689,7 @@ interface AppOrganizationIdRouteChildren {
   AppOrganizationIdInvitationsRoute: typeof AppOrganizationIdInvitationsRoute
   AppOrganizationIdMembersRoute: typeof AppOrganizationIdMembersRoute
   AppOrganizationIdRepositoryRoute: typeof AppOrganizationIdRepositoryRoute
+  AppOrganizationIdStripeRoute: typeof AppOrganizationIdStripeRoute
   AppOrganizationIdUploadRoute: typeof AppOrganizationIdUploadRoute
   AppOrganizationIdWorkflowRoute: typeof AppOrganizationIdWorkflowRoute
   AppOrganizationIdIndexRoute: typeof AppOrganizationIdIndexRoute
@@ -686,6 +706,7 @@ const AppOrganizationIdRouteChildren: AppOrganizationIdRouteChildren = {
   AppOrganizationIdInvitationsRoute: AppOrganizationIdInvitationsRoute,
   AppOrganizationIdMembersRoute: AppOrganizationIdMembersRoute,
   AppOrganizationIdRepositoryRoute: AppOrganizationIdRepositoryRoute,
+  AppOrganizationIdStripeRoute: AppOrganizationIdStripeRoute,
   AppOrganizationIdUploadRoute: AppOrganizationIdUploadRoute,
   AppOrganizationIdWorkflowRoute: AppOrganizationIdWorkflowRoute,
   AppOrganizationIdIndexRoute: AppOrganizationIdIndexRoute,

@@ -1,6 +1,7 @@
 import { ConfigProvider, Effect, Layer, ServiceMap } from "effect";
 import { D1 } from "./D1";
 import { Repository } from "./Repository";
+import { Stripe } from "./Stripe";
 
 export const CloudflareEnv = ServiceMap.Service<Env>("CloudflareEnv");
 
@@ -10,22 +11,25 @@ export const Greeting = ServiceMap.Service<{
 
 const makeAppLayer = (env: Env) =>
   Layer.provideMerge(
-    Repository.layer,
+    Stripe.layer,
     Layer.provideMerge(
-      D1.layer,
-      Layer.succeedServices(
-        ServiceMap.make(CloudflareEnv, env)
-          .pipe(
-            ServiceMap.add(Greeting, {
-              greet: () => "Hello from Effect 4 ServiceMap!",
-            }),
-          )
-          .pipe(
-            ServiceMap.add(
-              ConfigProvider.ConfigProvider,
-              ConfigProvider.fromUnknown(env),
+      Repository.layer,
+      Layer.provideMerge(
+        D1.layer,
+        Layer.succeedServices(
+          ServiceMap.make(CloudflareEnv, env)
+            .pipe(
+              ServiceMap.add(Greeting, {
+                greet: () => "Hello from Effect 4 ServiceMap!",
+              }),
+            )
+            .pipe(
+              ServiceMap.add(
+                ConfigProvider.ConfigProvider,
+                ConfigProvider.fromUnknown(env),
+              ),
             ),
-          ),
+        ),
       ),
     ),
   );

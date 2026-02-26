@@ -253,14 +253,8 @@ When implementing later:
    - old async code keeps `stripe-service.ts`
    - new Effect code uses `yield* Stripe`.
 
-## Concrete Decisions To Confirm Before Implementation
+## Locked Decisions
 
-1. Strict parity on portal KV flag behavior:
-   - keep current behavior exactly
-   - or set KV true immediately after creating config
-2. Error model:
-   - single `StripeError` with `op + retryable`
-   - or split into `StripeApiError`/`StripeInvariantError` tags
-3. `getPlans` return type:
-   - `Effect<Plan[], StripeError>`
-   - or `Effect<ReadonlyArray<Plan>, StripeError>` for stronger immutability
+1. Strict parity with `stripe-service.ts` behavior.
+2. Single error type: `StripeError`.
+3. Stronger immutability: `getPlans` returns `Effect<ReadonlyArray<Plan>, StripeError>`.
