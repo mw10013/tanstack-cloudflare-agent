@@ -93,13 +93,72 @@ const session = await context.authService.api.getSession({ headers: request.head
 
 Very small and read-only, but less ideal as first slice because it is harder to exercise quickly (requires OAuth callback path).
 
-## Suggested Spike Sequence
+## Extended Spike Sequence
 
-1. Keep existing dedicated spike route (`/app/$organizationId/auth`) as service sanity check.
-2. Migrate `app.$organizationId.index.tsx` loader `getSession` to `Auth.ts`.
-3. If stable, migrate `api/google/callback.tsx` `getSession`.
-4. Then move read-only auth calls in other loaders (`members` loader first).
-5. Leave `/api/auth/$`, sign-in, sign-out, impersonation, subscription mutations for later phase.
+Scope rule for early phases: only move read-only auth calls first (`getSession`, read queries). Keep all cookie-mutating and auth-mutating operations on `auth-service.ts` until late phase.
+
+Phase 0: Baseline and guardrails
+
+1. Keep `/app/$organizationId/auth` as a control route to confirm `Auth.ts` resolves and returns session in production-like requests.
+2. Define rollback switch: any regression means revert only the specific migrated call-site, not global auth wiring.
+3. Log baseline behavior for key pages (`/app/:organizationId`, `/app/:organizationId/members`, `/api/google/callback`) before any migration.
+
+Phase 1: Single low-risk read in a core page
+
+4. Migrate only `getSession` in `src/routes/app.$organizationId.index.tsx` loader to `Auth.ts` via `runEffect`.
+5. Keep invitation mutations (`acceptInvitation`, `rejectInvitation`) on `authService`.
+6. Verify: app home loads, invitation cards render, `memberCount/pendingInvitationCount` unchanged.
+
+Phase 2: Another isolated read-only endpoint
+
+7. Migrate `getSession` in `src/routes/api/google/callback.tsx` to `Auth.ts`.
+8. Keep OAuth token exchange and durable object calls unchanged.
+9. Verify: unauthorized callback still returns 401, valid callback still redirects to `.../google?google=connected|error|denied` correctly.
+
+Phase 3: Read-heavy organization screens
+
+10. Migrate `getSession` in `src/routes/app.$organizationId.members.tsx` loader.
+11. Keep `hasPermission`, `listMembers`, and mutations (`removeMember`, `leaveOrganization`, `updateMemberRole`) on existing `authService`.
+12. Verify: members list loads, role badges match previous behavior, leave/remove/update still work (still served by old auth path).
+
+Phase 4: Additional read-only getSession consumers
+
+13. Evaluate migrating worker-level read checks one by one:
+    - `onBeforeConnect` session check in `src/worker.ts`
+    - `onBeforeRequest` session check in `src/worker.ts`
+    - request bootstrap `session` injection in `src/worker.ts`
+14. Do these separately (not one PR) because worker regressions affect all routes/agents.
+15. Verify agent auth (`401`/`403`) behavior is unchanged.
+
+Phase 5: Read operations beyond getSession
+
+16. Start migrating read-only auth API calls in route loaders/beforeLoad:
+    - `listOrganizations` in `src/routes/app.$organizationId.tsx`
+    - `listInvitations` / permission checks in invitations flow (read path only where possible)
+17. Keep write operations and cookie-sensitive actions on old service.
+
+Phase 6: Cookie-mutating operations (higher risk)
+
+18. Migrate one mutation that does not redefine auth routing first (example: `signOut` server fn), then validate cookie clearing and redirect behavior.
+19. Migrate `impersonateUser` after sign-out proves stable, because it also mutates auth cookies.
+20. Verify via browser session transitions, not only API assertions.
+
+Phase 7: Better Auth handler boundary
+
+21. Migrate `/api/auth/$` handler from `context.authService.handler(request)` to `Auth.ts` only after all major API calls are already proven.
+22. Validate magic-link verify, subscription webhook allowlist paths, billing callbacks, and auth endpoint status codes.
+
+Phase 8: Convergence and deprecation
+
+23. Remove remaining `authService` call-sites after parity checks pass.
+24. Remove `createAuthService` usage from `worker.ts`.
+25. Remove `src/lib/auth-service.ts` and associated old typings once no references remain.
+
+Recommended batching rule:
+
+- Batch size: one migrated call-site per spike PR in Phases 1-4.
+- Promote to two call-sites per PR only after 2-3 clean spikes.
+- Never mix worker-level changes and route-level changes in the same spike PR.
 
 ## Spike Success Criteria
 
