@@ -1,6 +1,6 @@
 import { invariant } from "@epic-web/invariant";
 import * as Schema from "effect/Schema";
-import * as Domain from "@/lib/domain";
+import * as Domain from "@/lib/Domain";
 
 /**
  * The repository provides data access methods for the application's domain entities.
@@ -167,7 +167,9 @@ select json_object(
     return Schema.decodeUnknownSync(
       Schema.fromJsonString(
         Schema.Struct({
-          userInvitations: Schema.Array(Domain.InvitationWithOrganizationAndInviter),
+          userInvitations: Schema.Array(
+            Domain.InvitationWithOrganizationAndInviter,
+          ),
           memberCount: Schema.Number,
           pendingInvitationCount: Schema.Number,
         }),

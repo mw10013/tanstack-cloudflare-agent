@@ -40,7 +40,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import * as Domain from "@/lib/domain";
+import * as Domain from "@/lib/Domain";
 
 const emailPattern = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
@@ -180,8 +180,7 @@ function InviteForm({ organizationId }: { organizationId: string }) {
   const isHydrated = useHydrated();
   const inviteServerFn = useServerFn(invite);
   const inviteMutation = useMutation({
-    mutationFn: (data: typeof inviteSchema.Encoded) =>
-      inviteServerFn({ data }),
+    mutationFn: (data: typeof inviteSchema.Encoded) => inviteServerFn({ data }),
     onSuccess: () => {
       form.reset();
       void router.invalidate();

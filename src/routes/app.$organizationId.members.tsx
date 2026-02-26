@@ -26,7 +26,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import * as Domain from "@/lib/domain";
+import * as Domain from "@/lib/Domain";
 
 const organizationIdSchema = Schema.Struct({ organizationId: Schema.String });
 

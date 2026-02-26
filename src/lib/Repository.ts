@@ -1,6 +1,6 @@
 import { Effect, Layer, Schema, ServiceMap } from "effect";
 import { D1 } from "./D1";
-import * as Domain from "./domain";
+import * as Domain from "./Domain";
 import { DataFromResult } from "./SchemaEx";
 
 export class Repository extends ServiceMap.Service<Repository>()("Repository", {
