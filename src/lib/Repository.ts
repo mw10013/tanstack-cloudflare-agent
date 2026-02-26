@@ -12,9 +12,14 @@ export class Repository extends ServiceMap.Service<Repository>()("Repository", {
           const result = yield* d1.first(
             d1.prepare(`select * from User where email = ?1`).bind(email),
           );
-          if (result == null) return Option.none<Domain.User>();
-          return Option.some(
-            yield* Schema.decodeUnknownEffect(Domain.User)(result),
+          return yield* Option.fromNullishOr(result).pipe(
+            Option.match({
+              onNone: () => Effect.succeed(Option.none<Domain.User>()),
+              onSome: (r) =>
+                Schema.decodeUnknownEffect(Domain.User)(r).pipe(
+                  Effect.map(Option.some),
+                ),
+            }),
           );
         }),
 
