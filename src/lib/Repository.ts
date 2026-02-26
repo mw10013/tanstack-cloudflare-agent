@@ -1,4 +1,4 @@
-import { Effect, Layer, Option, Schema, ServiceMap } from "effect";
+import { Effect, Layer, Schema, ServiceMap } from "effect";
 import { D1 } from "./D1";
 import * as Domain from "./domain";
 import { DataFromResult } from "./SchemaEx";
@@ -12,14 +12,10 @@ export class Repository extends ServiceMap.Service<Repository>()("Repository", {
           const result = yield* d1.first(
             d1.prepare(`select * from User where email = ?1`).bind(email),
           );
-          return yield* Option.fromNullishOr(result).pipe(
-            Option.match({
-              onNone: () => Effect.succeed(Option.none<Domain.User>()),
-              onSome: (r) =>
-                Schema.decodeUnknownEffect(Domain.User)(r).pipe(
-                  Effect.map(Option.some),
-                ),
-            }),
+          // Nullish row becomes Option.none; present row decodes to Option.some(user); decode failures still fail.
+          return yield* Effect.fromNullishOr(result).pipe(
+            Effect.flatMap(Schema.decodeUnknownEffect(Domain.User)),
+            Effect.catchNoSuchElement,
           );
         }),
 
