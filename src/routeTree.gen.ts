@@ -36,6 +36,7 @@ import { Route as AppOrganizationIdEffectRouteImport } from './routes/app.$organ
 import { Route as AppOrganizationIdD1RouteImport } from './routes/app.$organizationId.d1'
 import { Route as AppOrganizationIdChatRouteImport } from './routes/app.$organizationId.chat'
 import { Route as AppOrganizationIdBillingRouteImport } from './routes/app.$organizationId.billing'
+import { Route as AppOrganizationIdAuthRouteImport } from './routes/app.$organizationId.auth'
 import { Route as AppOrganizationIdAgentRouteImport } from './routes/app.$organizationId.agent'
 import { Route as ApiGoogleCallbackRouteImport } from './routes/api/google/callback'
 import { Route as ApiAuthSplatRouteImport } from './routes/api/auth/$'
@@ -182,6 +183,11 @@ const AppOrganizationIdBillingRoute =
     path: '/billing',
     getParentRoute: () => AppOrganizationIdRoute,
   } as any)
+const AppOrganizationIdAuthRoute = AppOrganizationIdAuthRouteImport.update({
+  id: '/auth',
+  path: '/auth',
+  getParentRoute: () => AppOrganizationIdRoute,
+} as any)
 const AppOrganizationIdAgentRoute = AppOrganizationIdAgentRouteImport.update({
   id: '/agent',
   path: '/agent',
@@ -226,6 +232,7 @@ export interface FileRoutesByFullPath {
   '/api/auth/$': typeof ApiAuthSplatRoute
   '/api/google/callback': typeof ApiGoogleCallbackRoute
   '/app/$organizationId/agent': typeof AppOrganizationIdAgentRoute
+  '/app/$organizationId/auth': typeof AppOrganizationIdAuthRoute
   '/app/$organizationId/billing': typeof AppOrganizationIdBillingRoute
   '/app/$organizationId/chat': typeof AppOrganizationIdChatRoute
   '/app/$organizationId/d1': typeof AppOrganizationIdD1Route
@@ -256,6 +263,7 @@ export interface FileRoutesByTo {
   '/api/auth/$': typeof ApiAuthSplatRoute
   '/api/google/callback': typeof ApiGoogleCallbackRoute
   '/app/$organizationId/agent': typeof AppOrganizationIdAgentRoute
+  '/app/$organizationId/auth': typeof AppOrganizationIdAuthRoute
   '/app/$organizationId/billing': typeof AppOrganizationIdBillingRoute
   '/app/$organizationId/chat': typeof AppOrganizationIdChatRoute
   '/app/$organizationId/d1': typeof AppOrganizationIdD1Route
@@ -291,6 +299,7 @@ export interface FileRoutesById {
   '/api/auth/$': typeof ApiAuthSplatRoute
   '/api/google/callback': typeof ApiGoogleCallbackRoute
   '/app/$organizationId/agent': typeof AppOrganizationIdAgentRoute
+  '/app/$organizationId/auth': typeof AppOrganizationIdAuthRoute
   '/app/$organizationId/billing': typeof AppOrganizationIdBillingRoute
   '/app/$organizationId/chat': typeof AppOrganizationIdChatRoute
   '/app/$organizationId/d1': typeof AppOrganizationIdD1Route
@@ -326,6 +335,7 @@ export interface FileRouteTypes {
     | '/api/auth/$'
     | '/api/google/callback'
     | '/app/$organizationId/agent'
+    | '/app/$organizationId/auth'
     | '/app/$organizationId/billing'
     | '/app/$organizationId/chat'
     | '/app/$organizationId/d1'
@@ -356,6 +366,7 @@ export interface FileRouteTypes {
     | '/api/auth/$'
     | '/api/google/callback'
     | '/app/$organizationId/agent'
+    | '/app/$organizationId/auth'
     | '/app/$organizationId/billing'
     | '/app/$organizationId/chat'
     | '/app/$organizationId/d1'
@@ -390,6 +401,7 @@ export interface FileRouteTypes {
     | '/api/auth/$'
     | '/api/google/callback'
     | '/app/$organizationId/agent'
+    | '/app/$organizationId/auth'
     | '/app/$organizationId/billing'
     | '/app/$organizationId/chat'
     | '/app/$organizationId/d1'
@@ -610,6 +622,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AppOrganizationIdBillingRouteImport
       parentRoute: typeof AppOrganizationIdRoute
     }
+    '/app/$organizationId/auth': {
+      id: '/app/$organizationId/auth'
+      path: '/auth'
+      fullPath: '/app/$organizationId/auth'
+      preLoaderRoute: typeof AppOrganizationIdAuthRouteImport
+      parentRoute: typeof AppOrganizationIdRoute
+    }
     '/app/$organizationId/agent': {
       id: '/app/$organizationId/agent'
       path: '/agent'
@@ -680,6 +699,7 @@ const AdminRouteWithChildren = AdminRoute._addFileChildren(AdminRouteChildren)
 
 interface AppOrganizationIdRouteChildren {
   AppOrganizationIdAgentRoute: typeof AppOrganizationIdAgentRoute
+  AppOrganizationIdAuthRoute: typeof AppOrganizationIdAuthRoute
   AppOrganizationIdBillingRoute: typeof AppOrganizationIdBillingRoute
   AppOrganizationIdChatRoute: typeof AppOrganizationIdChatRoute
   AppOrganizationIdD1Route: typeof AppOrganizationIdD1Route
@@ -697,6 +717,7 @@ interface AppOrganizationIdRouteChildren {
 
 const AppOrganizationIdRouteChildren: AppOrganizationIdRouteChildren = {
   AppOrganizationIdAgentRoute: AppOrganizationIdAgentRoute,
+  AppOrganizationIdAuthRoute: AppOrganizationIdAuthRoute,
   AppOrganizationIdBillingRoute: AppOrganizationIdBillingRoute,
   AppOrganizationIdChatRoute: AppOrganizationIdChatRoute,
   AppOrganizationIdD1Route: AppOrganizationIdD1Route,
