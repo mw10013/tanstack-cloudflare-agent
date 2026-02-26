@@ -65,20 +65,21 @@ Pattern per method: `prepare → d1.first → fromNullable → decodeUnknown(sch
 
 ## Effect 3 → 4 Differences for Repository
 
-| Aspect                     | Effect 3 (cerr)                             | Effect 4 (target)                                |
-| -------------------------- | ------------------------------------------- | ------------------------------------------------ |
-| Service declaration        | `Effect.Service<R>()('name', { ... })`      | `ServiceMap.Service<R>()("name", { make: ... })` |
-| Shape typing               | Explicit in `effect:` return type           | Inferred from `make` return type                 |
-| Layer attachment           | `dependencies: [D1.Default]` inside service | `static layer = Layer.effect(this, this.make)`   |
-| Accessors                  | `accessors: true` auto-generates            | Not available; use `yield*`                      |
-| Service construction       | Return plain object from `effect:`          | Return `Repository.of({ ... })`                  |
-| Default layer              | `D1.Default`                                | `D1.layer` (convention: `layer` not `Default`)   |
-| Error class                | `Data.TaggedError`                          | `Schema.TaggedErrorClass` preferred              |
-| Nullable → absent          | `Effect.fromNullable`                       | `Option.fromNullOr` / `Effect.fromNullishOr`     |
-| Schema decode              | `Schema.decodeUnknown(schema)`              | Same API, still available in v4                  |
-| `Schema.parseJson`         | `Schema.parseJson(schema)`                  | `Schema.fromJsonString(schema)`                  |
-| Functions returning Effect | `Effect.gen(function*() { ... })`           | `Effect.fn("name")(function*(...) { ... })`      |
-| Schema transforms          | `Schema.transform(from, to, opts)`          | `from.pipe(Schema.decodeTo(to, transform))`      |
+| Aspect                     | Effect 3 (cerr)                             | Effect 4 (target)                                               |
+| -------------------------- | ------------------------------------------- | --------------------------------------------------------------- |
+| Service declaration        | `Effect.Service<R>()('name', { ... })`      | `ServiceMap.Service<R>()("name", { make: ... })`                |
+| Shape typing               | Explicit in `effect:` return type           | Inferred from `make` return type                                |
+| Layer attachment           | `dependencies: [D1.Default]` inside service | `static layer = Layer.effect(this, this.make)`                  |
+| Accessors                  | `accessors: true` auto-generates            | Not available; use `yield*`                                     |
+| Service construction       | Return plain object from `effect:`          | Return plain object from `make:` (shape inferred)               |
+| Default layer              | `D1.Default`                                | `D1.layer` (convention: `layer` not `Default`)                  |
+| Error class                | `Data.TaggedError`                          | `Schema.TaggedErrorClass` preferred                             |
+| Schema error type          | `ParseError`                                | `Schema.SchemaError` (`_tag = "SchemaError"`)                   |
+| Nullable → absent          | `Effect.fromNullable`                       | `Option.fromNullOr` / `Effect.fromNullishOr`                    |
+| Schema decode (Effect)     | `Schema.decodeUnknown(schema)`              | `Schema.decodeUnknownEffect(schema)` → `Effect<A, SchemaError>` |
+| `Schema.parseJson`         | `Schema.parseJson(schema)`                  | `Schema.fromJsonString(schema)`                                 |
+| Functions returning Effect | `Effect.gen(function*() { ... })`           | `Effect.fn("name")(function*(...) { ... })`                     |
+| Schema transforms          | `Schema.transform(from, to, opts)`          | `from.pipe(Schema.decodeTo(to, transform))`                     |
 
 ## ServiceMap.Service: `make` Pattern (Inferred Shape)
 
@@ -126,21 +127,11 @@ export class Repository extends ServiceMap.Service<Repository>()("Repository", {
   make: Effect.gen(function* () {
     const d1 = yield* D1;
 
-    const getUser = Effect.fn("Repository.getUser")(/* ... */);
-    const getUsers = Effect.fn("Repository.getUsers")(/* ... */);
-    // ... all methods
-
-    return Repository.of({
-      getUser,
-      getUsers,
-      getAppDashboardData,
-      getAdminDashboardData,
-      getCustomers,
-      getSubscriptions,
-      getSessions,
-      updateInvitationRole,
-      deleteExpiredSessions,
-    });
+    return {
+      getUser: Effect.fn("Repository.getUser")(/* ... */),
+      getUsers: Effect.fn("Repository.getUsers")(/* ... */),
+      // ... all methods inline
+    };
   }),
 }) {
   static layer = Layer.effect(this, this.make);
@@ -161,27 +152,10 @@ const getUser = async ({ email }) => {
 };
 ```
 
-Effect 4 — return `Option<Domain.User>`:
+Effect 4 — return `Option<Domain.User>`, schema errors in error channel:
 
 ```ts
-const getUser = Effect.fn("Repository.getUser")(function* ({
-  email,
-}: {
-  email: Domain.User["email"];
-}) {
-  const result = yield* d1.first(
-    d1.prepare(`select * from User where email = ?1`).bind(email),
-  );
-  return Option.fromNullOr(result).pipe(
-    Option.map((row) => Schema.decodeUnknownSync(Domain.User)(row)),
-  );
-});
-```
-
-Or, keeping decode in the Effect channel (schema errors become defects):
-
-```ts
-const getUser = Effect.fn("Repository.getUser")(function* ({
+getUser: Effect.fn("Repository.getUser")(function* ({
   email,
 }: {
   email: Domain.User["email"];
@@ -191,10 +165,12 @@ const getUser = Effect.fn("Repository.getUser")(function* ({
   );
   if (result == null) return Option.none();
   return Option.some(
-    yield* Schema.decodeUnknown(Domain.User)(result).pipe(Effect.orDie),
+    yield* Schema.decodeUnknownEffect(Domain.User)(result),
   );
-});
+}),
 ```
+
+`Schema.decodeUnknownEffect` returns `Effect<A, Schema.SchemaError>`. The `SchemaError` stays in the typed error channel — it's a real operational error (unexpected data shape, null where non-null expected, etc.), not a defect to swallow with `orDie`.
 
 ### Method Pattern (JSON aggregation — `{ data: string }` result)
 
@@ -212,7 +188,7 @@ const getUsers = async ({ limit, offset, searchValue }) => {
 Effect 4 using `DataFromResult`:
 
 ```ts
-const getUsers = Effect.fn("Repository.getUsers")(function* ({
+getUsers: Effect.fn("Repository.getUsers")(function* ({
   limit,
   offset,
   searchValue,
@@ -227,7 +203,7 @@ const getUsers = Effect.fn("Repository.getUsers")(function* ({
       .prepare(`select json_object(...) as data`)
       .bind(searchPattern, limit, offset),
   );
-  return yield* Schema.decodeUnknown(
+  return yield* Schema.decodeUnknownEffect(
     DataFromResult(
       Schema.Struct({
         users: Schema.Array(Domain.User),
@@ -236,8 +212,8 @@ const getUsers = Effect.fn("Repository.getUsers")(function* ({
         offset: Schema.Number,
       }),
     ),
-  )(result).pipe(Effect.orDie);
-});
+  )(result);
+}),
 ```
 
 `DataFromResult` replaces `invariant` + manual `fromJsonString`. It validates `{ data: string }` shape → extracts `data` → parses JSON → validates against schema.
@@ -245,7 +221,7 @@ const getUsers = Effect.fn("Repository.getUsers")(function* ({
 ### Method Pattern (Simple write — no decode)
 
 ```ts
-const updateInvitationRole = Effect.fn("Repository.updateInvitationRole")(
+updateInvitationRole: Effect.fn("Repository.updateInvitationRole")(
   function* ({ invitationId, role }: { invitationId: string; role: string }) {
     yield* d1.run(
       d1
@@ -253,29 +229,36 @@ const updateInvitationRole = Effect.fn("Repository.updateInvitationRole")(
         .bind(role, invitationId),
     );
   },
-);
+),
 ```
 
 ### Method Pattern (Write returning metadata)
 
 ```ts
-const deleteExpiredSessions = Effect.fn("Repository.deleteExpiredSessions")(
+deleteExpiredSessions: Effect.fn("Repository.deleteExpiredSessions")(
   function* () {
     const result = yield* d1.run(
       d1.prepare("delete from Session where expiresAt < datetime('now')"),
     );
     return result.meta.changes;
   },
-);
+),
 ```
 
 ### Error Typing
 
-**Schema decode failures → defects (via `Effect.orDie`).** A schema mismatch in the repository means the SQL query shape doesn't match the domain model — that's a programmer error, not a recoverable runtime condition.
+Both `D1Error` and `Schema.SchemaError` stay in the typed error channel. They are real operational errors:
 
-**`D1Error` stays in the typed error channel.** Database failures (connection issues, constraint violations) are recoverable runtime errors consumers should handle.
+- **`D1Error`** — database failures (connection issues, constraint violations, retries exhausted)
+- **`Schema.SchemaError`** — query result doesn't match expected shape (unexpected nulls, type mismatches, schema drift)
 
-The error channel is inferred from the `make` return type — no need to declare it. Methods using `d1.first`/`d1.run` naturally carry `D1Error`. Schema decode errors are converted to defects with `.pipe(Effect.orDie)`, keeping the error channel clean.
+Neither should be swallowed with `orDie`. Both are runtime conditions a consumer may need to handle — retry, fallback, log and report, surface to user, etc.
+
+`Schema.SchemaError` has `_tag = "SchemaError"`, so consumers can discriminate with `Effect.catchTag("SchemaError", ...)`.
+
+The error channel is inferred from the `make` return type — `D1Error | Schema.SchemaError` flows naturally from the method implementations. No manual error type declarations needed.
+
+**v3 → v4 rename:** `Schema.decodeUnknown` → `Schema.decodeUnknownEffect` (returns `Effect<A, Schema.SchemaError>`).
 
 ### Nullable Results → `Option`
 
@@ -302,85 +285,75 @@ export class Repository extends ServiceMap.Service<Repository>()("Repository", {
   make: Effect.gen(function* () {
     const d1 = yield* D1;
 
-    const getUser = Effect.fn("Repository.getUser")(function* ({
-      email,
-    }: {
-      email: Domain.User["email"];
-    }) {
-      const result = yield* d1.first(
-        d1.prepare(`select * from User where email = ?1`).bind(email),
-      );
-      if (result == null) return Option.none();
-      return Option.some(
-        yield* Schema.decodeUnknown(Domain.User)(result).pipe(Effect.orDie),
-      );
-    });
-
-    const getUsers = Effect.fn("Repository.getUsers")(function* ({
-      limit,
-      offset,
-      searchValue,
-    }: {
-      limit: number;
-      offset: number;
-      searchValue?: string;
-    }) {
-      const searchPattern = searchValue ? `%${searchValue}%` : "%";
-      const result = yield* d1.first(
-        d1
-          .prepare(`select json_object(...) as data`)
-          .bind(searchPattern, limit, offset),
-      );
-      return yield* Schema.decodeUnknown(
-        DataFromResult(
-          Schema.Struct({
-            users: Schema.Array(Domain.User),
-            count: Schema.Number,
-            limit: Schema.Number,
-            offset: Schema.Number,
-          }),
-        ),
-      )(result).pipe(Effect.orDie);
-    });
-
-    // ... remaining methods follow same patterns
-
-    const updateInvitationRole = Effect.fn("Repository.updateInvitationRole")(
-      function* ({
-        invitationId,
-        role,
+    return {
+      getUser: Effect.fn("Repository.getUser")(function* ({
+        email,
       }: {
-        invitationId: string;
-        role: string;
+        email: Domain.User["email"];
       }) {
-        yield* d1.run(
+        const result = yield* d1.first(
+          d1.prepare(`select * from User where email = ?1`).bind(email),
+        );
+        if (result == null) return Option.none();
+        return Option.some(
+          yield* Schema.decodeUnknownEffect(Domain.User)(result),
+        );
+      }),
+
+      getUsers: Effect.fn("Repository.getUsers")(function* ({
+        limit,
+        offset,
+        searchValue,
+      }: {
+        limit: number;
+        offset: number;
+        searchValue?: string;
+      }) {
+        const searchPattern = searchValue ? `%${searchValue}%` : "%";
+        const result = yield* d1.first(
           d1
-            .prepare("update Invitation set role = ?1 where id = ?2")
-            .bind(role, invitationId),
+            .prepare(`select json_object(...) as data`)
+            .bind(searchPattern, limit, offset),
         );
-      },
-    );
+        return yield* Schema.decodeUnknownEffect(
+          DataFromResult(
+            Schema.Struct({
+              users: Schema.Array(Domain.User),
+              count: Schema.Number,
+              limit: Schema.Number,
+              offset: Schema.Number,
+            }),
+          ),
+        )(result);
+      }),
 
-    const deleteExpiredSessions = Effect.fn("Repository.deleteExpiredSessions")(
-      function* () {
-        const result = yield* d1.run(
-          d1.prepare("delete from Session where expiresAt < datetime('now')"),
-        );
-        return result.meta.changes;
-      },
-    );
+      // ... remaining methods inline, same patterns
 
-    return Repository.of({
-      getUser,
-      getUsers,
-      getAppDashboardData,
-      getAdminDashboardData,
-      getCustomers,
-      getSubscriptions,
-      getSessions,
-      updateInvitationRole,
-      deleteExpiredSessions,
-    });
+      updateInvitationRole: Effect.fn("Repository.updateInvitationRole")(
+        function* ({
+          invitationId,
+          role,
+        }: {
+          invitationId: string;
+          role: string;
+        }) {
+          yield* d1.run(
+            d1
+              .prepare("update Invitation set role = ?1 where id = ?2")
+              .bind(role, invitationId),
+          );
+        },
+      ),
+
+      deleteExpiredSessions: Effect.fn("Repository.deleteExpiredSessions")(
+        function* () {
+          const result = yield* d1.run(
+            d1.prepare("delete from Session where expiresAt < datetime('now')"),
+          );
+          return result.meta.changes;
+        },
+      ),
+    };
   }),
 }) {
   static layer = Layer.effect(this, this.make);
@@ -459,25 +432,31 @@ Two overloads of `ServiceMap.Service`:
 
 **Decision: Use `make` pattern (overload 3).** Follows `D1.ts` convention. No interface/implementation duplication. `Effect.fn` types flow through. `this.make` is auto-exposed for `Layer.effect(this, this.make)`.
 
-### 3. Error channel typing
+### 3. Inline methods in return object (no intermediate variables)
 
-**Decision: `D1Error` in error channel, schema failures as defects via `Effect.orDie`.** Schema decode mismatches are programmer errors. Database failures are runtime errors consumers handle.
+`D1.ts` defines methods inline in the returned object — `return { prepare: ..., batch: ..., run: ..., first: ... }`. No intermediate `const prepare = ...` then `return { prepare }`.
 
-### 4. `Option` for nullable results
+**Decision: Define all methods inline in the return object.** Follows `D1.ts` exactly. Less noise, single return statement, the object literal IS the service shape.
+
+### 4. Error channel typing
+
+**Decision: Both `D1Error` and `Schema.SchemaError` in the error channel.** Both are real operational errors. Schema decode failures are not programmer bugs to swallow — they're runtime conditions (data drift, unexpected nulls, corrupt JSON). Consumers can discriminate with `Effect.catchTag("D1Error", ...)` or `Effect.catchTag("SchemaError", ...)`. No `orDie`.
+
+### 5. `Option` for nullable results
 
 **Decision: Use `Option`.** This is idiomatic Effect 4. The new Repository is independent — not a drop-in replacement for `repository.ts`. Consumers using the Effect version should use Effect idioms.
 
 Convert D1's `T | null` with `Option.fromNullOr(result)`.
 
-### 5. Service identifier
+### 6. Service identifier
 
 **Decision: Use `"Repository"`.** Short, clear. Namespaced identifiers (`"tanstack-cloudflare-agent/Repository"`) are recommended for published libraries. For application-level services, bare names are fine.
 
-### 6. SQL queries — fully independent
+### 7. SQL queries — fully independent
 
 **Decision: Duplicate SQL.** The two files share domain schemas from `domain.ts` but nothing else. SQL strings are duplicated for independent evolution.
 
-### 7. File naming
+### 8. File naming
 
 - Existing: `repository.ts` (lowercase, factory function)
 - New: `Repository.ts` (PascalCase, Effect service class)
@@ -530,14 +509,14 @@ Replaces the `invariant` + manual `fromJsonString` pattern.
 
 ## Coexistence
 
-| Aspect         | `repository.ts`            | `Repository.ts`                |
-| -------------- | -------------------------- | ------------------------------ |
-| Pattern        | Factory function           | `ServiceMap.Service`           |
-| Methods return | `Promise<T>`               | `Effect<T, D1Error>`           |
-| Nullable       | `T \| null`                | `Option<T>`                    |
-| Schema errors  | Thrown (untyped)           | Defects (`Effect.orDie`)       |
-| D1 access      | Raw `D1Database`           | `D1` Effect service            |
-| Consumption    | `await repo.method()`      | `yield* repo.method()`         |
-| Wiring         | `createRepository({ db })` | `yield* Repository` from layer |
+| Aspect         | `repository.ts`            | `Repository.ts`                            |
+| -------------- | -------------------------- | ------------------------------------------ |
+| Pattern        | Factory function           | `ServiceMap.Service`                       |
+| Methods return | `Promise<T>`               | `Effect<T, D1Error \| Schema.SchemaError>` |
+| Nullable       | `T \| null`                | `Option<T>`                                |
+| Schema errors  | Thrown (untyped)           | Typed in error channel (`SchemaError`)     |
+| D1 access      | Raw `D1Database`           | `D1` Effect service                        |
+| Consumption    | `await repo.method()`      | `yield* repo.method()`                     |
+| Wiring         | `createRepository({ db })` | `yield* Repository` from layer             |
 
 Both import from `domain.ts`. Both have their own SQL. They are completely independent.
