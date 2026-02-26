@@ -22,8 +22,13 @@ const pluck =
 /**
  * Schema for D1 rows shaped `{ data: string }` (e.g. from `json_group_array`/`json_object` queries).
  * Extracts the `data` column, parses the JSON string, and validates against `DataSchema`.
+ *
+ * Uses `<S extends Schema.Top>` instead of `<A>(Schema.Schema<A>)` to preserve
+ * the concrete schema type through the pipeline. `Schema.Schema<A>` erases
+ * `DecodingServices` to `unknown` (inherited from `Schema.Top`), which causes
+ * `Schema.decodeUnknownEffect` to infer `R = unknown` instead of `R = never`.
  */
-export const DataFromResult = <A>(DataSchema: Schema.Schema<A>) =>
+export const DataFromResult = <S extends Schema.Top>(DataSchema: S) =>
   Schema.Struct({ data: Schema.String }).pipe(
     pluck("data"),
     Schema.decodeTo(Schema.fromJsonString(DataSchema)),

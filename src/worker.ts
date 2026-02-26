@@ -1,15 +1,15 @@
 import type { AuthService } from "@/lib/auth-service";
 import type { RunEffect } from "@/lib/effect-services";
-import type { Repository } from "@/lib/repository";
+import type { Repository } from "@/lib/repository-service";
 import type { StripeService } from "@/lib/stripe-service";
 import serverEntry from "@tanstack/react-start/server-entry";
 import { getAgentByName, routeAgentRequest } from "agents";
 import * as Exit from "effect/Exit";
 import * as Schema from "effect/Schema";
-import { makeRunEffect } from "@/lib/effect-services";
 import { createAuthService } from "@/lib/auth-service";
 import { createD1SessionService } from "@/lib/d1-session-service";
-import { createRepository } from "@/lib/repository";
+import { makeRunEffect } from "@/lib/effect-services";
+import { createRepository } from "@/lib/repository-service";
 import { createStripeService } from "@/lib/stripe-service";
 import { extractAgentName } from "./organization-agent";
 
@@ -189,7 +189,10 @@ export default {
           message.ack();
           continue;
         }
-        const stub = await getAgentByName(env.ORGANIZATION_AGENT, organizationId);
+        const stub = await getAgentByName(
+          env.ORGANIZATION_AGENT,
+          organizationId,
+        );
         try {
           await stub.onUpload({
             name,
@@ -199,9 +202,10 @@ export default {
           });
           message.ack();
         } catch (error) {
-          const msg = error instanceof Error
-            ? `${error.name}: ${error.message}\n${error.stack ?? ""}`
-            : String(error);
+          const msg =
+            error instanceof Error
+              ? `${error.name}: ${error.message}\n${error.stack ?? ""}`
+              : String(error);
           console.error("queue onUpload failed", {
             key: notification.object.key,
             organizationId,
@@ -214,12 +218,10 @@ export default {
         continue;
       }
       const slashIndex = notification.object.key.indexOf("/");
-      const organizationId = slashIndex > 0
-        ? notification.object.key.slice(0, slashIndex)
-        : "";
-      const name = slashIndex > 0
-        ? notification.object.key.slice(slashIndex + 1)
-        : "";
+      const organizationId =
+        slashIndex > 0 ? notification.object.key.slice(0, slashIndex) : "";
+      const name =
+        slashIndex > 0 ? notification.object.key.slice(slashIndex + 1) : "";
       if (!organizationId || !name) {
         console.error("Invalid delete object key", {
           key: notification.object.key,
@@ -238,9 +240,10 @@ export default {
         });
         message.ack();
       } catch (error) {
-        const msg = error instanceof Error
-          ? `${error.name}: ${error.message}\n${error.stack ?? ""}`
-          : String(error);
+        const msg =
+          error instanceof Error
+            ? `${error.name}: ${error.message}\n${error.stack ?? ""}`
+            : String(error);
         console.error("queue onDelete failed", {
           key: notification.object.key,
           organizationId,
