@@ -311,10 +311,17 @@ export const fromNullishOr = <A>(
 
 `NoSuchElementError` IS an `Error` subclass (inheritance: `globalThis.Error → YieldableError → TaggedError("NoSuchElementError") → NoSuchElementError`). It has `_tag: "NoSuchElementError"`, `name: "NoSuchElementError"`, and `stack`.
 
-**Through `runPromise`:** `causeSquash` extracts `Fail[0].error` → the `NoSuchElementError` instance → thrown as-is. Since it IS `instanceof Error`, TanStack Start serializes it. However, its `.message` is empty by default (`new NoSuchElementError()` with no arg), which is why the browser shows "An unexpected error occurred" — seroval serializes it, the client gets an `Error` with an empty message, and the default error handling shows the generic message.
+**Through `runEffect` (Approach 2):** `Cause.squash` extracts `Fail[0].error` → the `NoSuchElementError` instance → it IS `instanceof Error` so `runEffect` throws it as-is (line 68-69 of `effect-services.ts`). TanStack Start serializes it fine. The client error boundary receives a valid `Error` object.
+
+**Root cause of "An unexpected error occurred":** `NoSuchElementError()` (no arg) sets `.message` to `""` (empty string). The catch boundary (`default-catch-boundary.tsx:32`) does `error.message || "An unexpected error occurred"` — empty string is falsy → shows the generic fallback. The error IS properly serialized and delivered; it just has no message.
+
+**Key distinction:** This is NOT a serialization problem (which is what Approach 2 solves). The error passes through `runEffect` and TanStack Start correctly. The issue is purely that `NoSuchElementError` defaults to an empty message, and the catch boundary doesn't use `error.name` or `error._tag` as fallback.
 
 **Fix options:**
 
-1. Provide a message: `Effect.fromNullishOr(session).pipe(Effect.mapError(() => new NoSuchElementError("Session required")))` — but still opaque to users
-2. Use `Effect.catch` to convert to a redirect (as in Approach 2): `Effect.fromNullishOr(session).pipe(Effect.catch(() => Effect.die(redirect({ to: "/login" }))))` — redirects unauthenticated users
-3. Use `Effect.orElseFail` with a domain error: `Effect.fromNullishOr(session).pipe(Effect.orElseFail(() => new SessionRequiredError()))` — typed, then handle in `runEffect`
+1. **Fix the catch boundary fallback** to use `error.name` when `.message` is empty: `error.message || error.name || "An unexpected error occurred"` — shows "NoSuchElementError" instead of the generic message
+2. **Provide a message** at the call site: `Effect.fromNullishOr(session).pipe(Effect.mapError(() => new NoSuchElementError("Session required")))` — but still opaque to end users
+3. **Use `Effect.orElseFail` with a domain error**: `Effect.fromNullishOr(session).pipe(Effect.orElseFail(() => new SessionRequiredError()))` — typed, then handle in `runEffect` or the catch boundary
+4. **Handle in the Effect pipeline** before it reaches the boundary — e.g. `Effect.catch` to convert to a different error or a redirect via `Effect.die(redirect(...))`
+
+Note: `redirect`/`notFound` via `Effect.die` are for route-level control flow, NOT for server fns. Server fns should throw errors that the calling route's `errorComponent` can display.
