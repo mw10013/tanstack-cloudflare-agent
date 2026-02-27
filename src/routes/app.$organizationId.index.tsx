@@ -6,7 +6,7 @@ import {
 } from "@tanstack/react-router";
 import { createServerFn, useServerFn } from "@tanstack/react-start";
 import { getRequest } from "@tanstack/react-start/server";
-import { Data, Effect } from "effect";
+import { Effect } from "effect";
 import * as Schema from "effect/Schema";
 import { Button } from "@/components/ui/button";
 import {
@@ -23,16 +23,11 @@ import {
   ItemDescription,
   ItemTitle,
 } from "@/components/ui/item";
-import { Auth } from "@/lib/Auth";
 import { Repository } from "@/lib/Repository";
 
 const organizationIdSchema = Schema.Struct({ organizationId: Schema.String });
 
 const invitationIdSchema = Schema.Struct({ invitationId: Schema.String });
-
-class MissingSessionError extends Data.TaggedError("MissingSessionError")<
-  Record<string, never>
-> {}
 
 export const Route = createFileRoute("/app/$organizationId/")({
   loader: ({ params: data }) => getLoaderData({ data }),
@@ -41,28 +36,20 @@ export const Route = createFileRoute("/app/$organizationId/")({
 
 const getLoaderData = createServerFn({ method: "GET" })
   .inputValidator(Schema.toStandardSchemaV1(organizationIdSchema))
-  .handler(async ({ data: { organizationId }, context: { runEffect } }) => {
-    return runEffect(
-      Effect.gen(function* () {
-        const request = getRequest();
-        const auth = yield* Auth;
-        const repository = yield* Repository;
-        const session = yield* auth
-          .getSession(request.headers)
-          .pipe(
-            Effect.flatMap((session) =>
-              Effect.fromNullishOr(session).pipe(
-                Effect.mapError(() => new MissingSessionError()),
-              ),
-            ),
-          );
-        return yield* repository.getAppDashboardData({
-          userEmail: session.user.email,
-          organizationId,
-        });
-      }),
-    );
-  });
+  .handler(
+    async ({ data: { organizationId }, context: { runEffect, session } }) => {
+      return runEffect(
+        Effect.gen(function* () {
+          const repository = yield* Repository;
+          const validSession = yield* Effect.fromNullishOr(session);
+          return yield* repository.getAppDashboardData({
+            userEmail: validSession.user.email,
+            organizationId,
+          });
+        }),
+      );
+    },
+  );
 
 const acceptInvitation = createServerFn({ method: "POST" })
   .inputValidator(Schema.toStandardSchemaV1(invitationIdSchema))
