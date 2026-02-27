@@ -40,9 +40,11 @@ const getLoaderData = createServerFn({ method: "GET" })
     async ({ data: { organizationId }, context: { runEffect, session } }) => {
       return runEffect(
         Effect.gen(function* () {
-          yield* Effect.fail(new Error("kaboom!"));
-          // const validSession = yield* Effect.fromNullishOr(null);
+          // yield* Effect.fail(new Error("kaboom!"));
+          console.log("will fromNullishOr");
+          const validSession = yield* Effect.fromNullishOr(null);
           // const validSession = yield* Effect.fromNullishOr(session);
+          console.log("did fromNullishOr");
           const repository = yield* Repository;
           return yield* repository.getAppDashboardData({
             userEmail: validSession.user.email,
