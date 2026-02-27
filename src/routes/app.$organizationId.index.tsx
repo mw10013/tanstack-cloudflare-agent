@@ -40,8 +40,8 @@ const getLoaderData = createServerFn({ method: "GET" })
     async ({ data: { organizationId }, context: { runEffect, session } }) => {
       return runEffect(
         Effect.gen(function* () {
-          const repository = yield* Repository;
           const validSession = yield* Effect.fromNullishOr(session);
+          const repository = yield* Repository;
           return yield* repository.getAppDashboardData({
             userEmail: validSession.user.email,
             organizationId,
