@@ -17,7 +17,58 @@ export const makeRunEffect = (env: Env) => {
 };
 ```
 
-Bring in the implementation of runPromise from refs/effect4 and any other bits and pieces so I can see how it is implemented and how it handles errors. Create a mermaid diagram if helpful.
+### `runPromise` internals (`refs/effect4`)
+
+```ts
+// internal/effect.ts:4802-4814
+export const runPromiseWith = <R>(services: ServiceMap.ServiceMap<R>) => {
+  const runPromiseExit = runPromiseExitWith(services);
+  return <A, E>(
+    effect: Effect.Effect<A, E, R>,
+    options?: Effect.RunOptions,
+  ): Promise<A> =>
+    runPromiseExit(effect, options).then((exit) => {
+      if (exit._tag === "Failure") {
+        throw causeSquash(exit.cause); // <-- rejects with raw E, not Error
+      }
+      return exit.value;
+    });
+};
+```
+
+```ts
+// internal/effect.ts:299-309 — causeSquash priority
+export const causeSquash = <E>(self: Cause.Cause<E>): unknown => {
+  const partitioned = causePartition(self);
+  if (partitioned.Fail.length > 0) return partitioned.Fail[0].error; // raw E
+  if (partitioned.Die.length > 0) return partitioned.Die[0].defect; // raw defect
+  if (partitioned.Interrupt.length > 0)
+    return new Error("All fibers interrupted without error");
+  return new Error("Empty cause");
+};
+```
+
+```mermaid
+sequenceDiagram
+    participant App as Effect.fail("kaboom!")
+    participant RP as runPromise
+    participant RPE as runPromiseExit
+    participant F as Fiber
+    participant CS as causeSquash
+
+    App->>RP: runPromise(effect)
+    RP->>RPE: runPromiseExit(effect)
+    RPE->>F: runFork(effect)
+    F-->>RPE: Exit.Failure { cause: Cause { reasons: [Fail { error: "kaboom!" }] } }
+    RPE-->>RP: Promise resolves with Exit
+    RP->>CS: causeSquash(exit.cause)
+    CS-->>RP: partitioned.Fail[0].error → "kaboom!" (raw string)
+    RP-->>App: Promise.reject("kaboom!") — NOT an Error instance
+```
+
+`Effect.fail("kaboom!")` → `causeSquash` returns `"kaboom!"` (the raw `E`). TanStack Start checks `result instanceof Error` — a string fails that check → client shows "An unexpected error occurred."
+
+If `E` is already an `Error` subclass (e.g. `Effect.fail(new MyError())`), `causeSquash` returns the `Error` instance and serialization works.
 
 ---
 
@@ -41,39 +92,64 @@ export const makeRunEffect = (env: Env) => {
 };
 ```
 
-Bring in the implementation of runPromiseExit and the awaited type of what it returns. Need to understand what is exit.cause and how it is populated.
-
-### Optional: Custom error class for richer `errorComponent` handling
-
-Remove this optional section.
+`runPromiseExit` always resolves (never rejects). It forks a fiber and resolves with the `Exit` when done:
 
 ```ts
-// src/lib/effect-error.ts
-import type { Cause } from "effect";
+// internal/effect.ts:4785-4799
+export const runPromiseExitWith = <R>(services: ServiceMap.ServiceMap<R>) => {
+  const runFork = runForkWith(services);
+  return <A, E>(
+    effect: Effect.Effect<A, E, R>,
+    options?: Effect.RunOptions,
+  ): Promise<Exit.Exit<A, E>> => {
+    const fiber = runFork(effect, options);
+    return new Promise((resolve) => {
+      fiber.addObserver((exit) => resolve(exit));
+    });
+  };
+};
+```
 
-export class EffectError extends Error {
-  readonly _tag = "EffectError";
-  constructor(public readonly effectCause: Cause.Cause<unknown>) {
-    super(Cause.pretty(effectCause));
-    this.name = "EffectError";
-  }
+```ts
+// Exit.ts:102 — discriminated union
+type Exit<A, E = never> = Success<A, E> | Failure<A, E>;
+
+// Exit.ts:147-150
+interface Success<A, E> {
+  readonly _tag: "Success";
+  readonly value: A;
+}
+
+// Exit.ts:178-181
+interface Failure<A, E> {
+  readonly _tag: "Failure";
+  readonly cause: Cause.Cause<E>;
 }
 ```
 
+`exit.cause` is a `Cause<E>` containing a `reasons: ReadonlyArray<Fail<E> | Die | Interrupt>`:
+
 ```ts
-// Then in runEffect:
-throw new EffectError(exit.cause);
+// Cause.ts:405-407 — Fail holds the typed E
+interface Fail<E> {
+  readonly _tag: "Fail";
+  readonly error: E;
+}
+
+// Cause.ts:377-379 — Die holds untyped defects (Effect.die, uncaught throws)
+interface Die {
+  readonly _tag: "Die";
+  readonly defect: unknown;
+}
+
+// Cause.ts:433-435 — Interrupt
+interface Interrupt {
+  readonly _tag: "Interrupt";
+  readonly fiberId: number | undefined;
+}
 ```
 
-```tsx
-// In a route's errorComponent:
-errorComponent: ({ error }) => {
-  if (error instanceof Error && error.name === "EffectError") {
-    return <div>{error.message}</div>;
-  }
-  return <ErrorComponent error={error} />;
-};
-```
+`Cause.pretty(cause)` produces a human-readable multi-line string suitable for `new Error(...)` messages.
 
 ### Pros
 
@@ -92,7 +168,43 @@ errorComponent: ({ error }) => {
 
 Build on Approach 1 but detect `redirect`/`notFound` objects that were placed in the defect channel via `Effect.die`, passing them through to TanStack's control flow.
 
-What are the type definitions of redirect and notFound? Are they instances of Error?
+### `redirect()` and `notFound()` — neither is an `Error`
+
+`redirect()` returns a `Response` (web standard), not an `Error`:
+
+```ts
+// tan-router/packages/router-core/src/redirect.ts:10-19
+type Redirect = Response & {
+  options: NavigateOptions;
+  redirectHandled?: boolean;
+};
+
+// Implementation: creates new Response(null, { status: 307, headers }), attaches .options
+```
+
+`notFound()` returns a plain object, not an `Error`:
+
+```ts
+// tan-router/packages/router-core/src/not-found.ts:4-19
+type NotFoundError = {
+  global?: boolean;
+  data?: any;
+  throw?: boolean;
+  routeId?: string;
+  headers?: HeadersInit;
+};
+
+// Implementation: mutates options with isNotFound = true, returns the object
+```
+
+Type guards:
+
+```ts
+// isRedirect: obj instanceof Response && !!obj.options
+// isNotFound: !!obj?.isNotFound
+```
+
+Since neither is an `Error` subclass, both pass through `causeSquash` as raw values. The `runEffect` checks `isRedirect`/`isNotFound` before wrapping in `Error`.
 
 ### Implementation
 
@@ -140,23 +252,6 @@ const getLoaderData = createServerFn({ method: "GET" })
   );
 ```
 
-### Per-fn domain error handling via `catchTag`/`catchTags`
-
-Combine with Effect's typed error handling for domain-specific responses:
-
-```ts
-Effect.gen(function* () {
-  // ... business logic with typed errors ...
-}).pipe(
-  Effect.catchTags({
-    NotFound: () => Effect.die(notFound()),
-    Unauthorized: () => Effect.die(redirect({ to: "/login" })),
-  }),
-);
-```
-
-This looks like too much boilerplate to attach to every gen. Do you think we should remove this section?
-
 ### Pros
 
 - Centralized error→Error conversion for all server fns
@@ -196,10 +291,28 @@ handler throws
   → route.errorComponent renders with { error, reset }
 ```
 
-I don't understand what happens with
+## Key Reference: `Effect.fromNullishOr` and `NoSuchElementError`
 
-```
-const validSession = yield* Effect.fromNullishOr(null);
+```ts
+const validSession = yield * Effect.fromNullishOr(null);
 ```
 
-I think this may fail the effect with NoSuchElementError. However, not sure what that is and how that comes out of runPromise. The browser seems to show An unexpected error occurred. which is too opaque
+This fails the effect with `NoSuchElementError` — a typed failure in the `E` channel:
+
+```ts
+// internal/effect.ts:928-929
+export const fromNullishOr = <A>(
+  value: A,
+): Effect<NonNullable<A>, Cause.NoSuchElementError> =>
+  value == null ? fail(new NoSuchElementError()) : succeed(value);
+```
+
+`NoSuchElementError` IS an `Error` subclass (inheritance: `globalThis.Error → YieldableError → TaggedError("NoSuchElementError") → NoSuchElementError`). It has `_tag: "NoSuchElementError"`, `name: "NoSuchElementError"`, and `stack`.
+
+**Through `runPromise`:** `causeSquash` extracts `Fail[0].error` → the `NoSuchElementError` instance → thrown as-is. Since it IS `instanceof Error`, TanStack Start serializes it. However, its `.message` is empty by default (`new NoSuchElementError()` with no arg), which is why the browser shows "An unexpected error occurred" — seroval serializes it, the client gets an `Error` with an empty message, and the default error handling shows the generic message.
+
+**Fix options:**
+
+1. Provide a message: `Effect.fromNullishOr(session).pipe(Effect.mapError(() => new NoSuchElementError("Session required")))` — but still opaque to users
+2. Use `Effect.catch` to convert to a redirect (as in Approach 2): `Effect.fromNullishOr(session).pipe(Effect.catch(() => Effect.die(redirect({ to: "/login" }))))` — redirects unauthenticated users
+3. Use `Effect.orElseFail` with a domain error: `Effect.fromNullishOr(session).pipe(Effect.orElseFail(() => new SessionRequiredError()))` — typed, then handle in `runEffect`
