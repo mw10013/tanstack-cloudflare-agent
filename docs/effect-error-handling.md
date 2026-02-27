@@ -1,12 +1,14 @@
 # Effect v4 + TanStack Start Server Fn Error Handling
 
-## Current Problem
+> **Status: Approach 2 implemented** in `src/lib/effect-services.ts:60-71`
+
+## Problem (solved)
 
 `runEffect` (`src/lib/effect-services.ts:46-47`) calls `Effect.runPromise`, which on failure calls `causeSquash(cause)` and throws the **raw error value** — e.g. `Effect.fail("kaboom!")` throws the string `"kaboom!"`.
 
 TanStack Start serializes thrown values via seroval and on the client checks `if (result instanceof Error) throw result`. A raw string isn't an `Error`, so the error path falls through to a generic "unexpected error occurred" message.
 
-### Current `runEffect`
+### Previous `runEffect`
 
 ```ts
 // src/lib/effect-services.ts
