@@ -56,6 +56,21 @@ type AppR = Layer.Success<AppLayer>;
  * `Effect.die` are detected and re-thrown as-is so TanStack's control flow
  * (HTTP 307 redirects, 404 not-found handling) works from within Effect
  * pipelines.
+ *
+ * **Error message preservation:** TanStack Router's `ShallowErrorPlugin`
+ * (seroval plugin used during SSR dehydration) serializes ONLY `.message`
+ * from Error objects — `.name`, `._tag`, `.stack`, and all custom properties
+ * are stripped. On the client it reconstructs `new Error(message)`. Effect v4
+ * errors like `NoSuchElementError` set `.name` on the prototype and often
+ * have `.message = undefined` (own property via `Object.assign`), so after
+ * dehydration the client receives a bare `Error` with an empty message.
+ * To ensure the error boundary always has something meaningful to display,
+ * we normalize the thrown Error to always carry a non-empty `.message`,
+ * using `Cause.pretty` which includes the error name and server-side stack
+ * trace. This causes some duplication in the browser (the client-generated
+ * `.stack` echoes `.message` in V8 environments) but preserves the full
+ * server context that would otherwise be lost after `ShallowErrorPlugin`
+ * strips everything except `.message`.
  */
 export const makeRunEffect = (env: Env) => {
   const appLayer = makeAppLayer(env);
@@ -65,9 +80,12 @@ export const makeRunEffect = (env: Env) => {
     const squashed = Cause.squash(exit.cause);
     // eslint-disable-next-line @typescript-eslint/only-throw-error -- redirect is a Response, notFound is a plain object; TanStack expects these thrown as-is
     if (isRedirect(squashed) || isNotFound(squashed)) throw squashed;
-    throw squashed instanceof Error
-      ? squashed
-      : new Error(Cause.pretty(exit.cause));
+    const pretty = Cause.pretty(exit.cause);
+    if (squashed instanceof Error) {
+      if (!squashed.message) squashed.message = pretty;
+      throw squashed;
+    }
+    throw new Error(pretty);
   };
 };
 

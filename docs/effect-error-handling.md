@@ -309,19 +309,64 @@ export const fromNullishOr = <A>(
   value == null ? fail(new NoSuchElementError()) : succeed(value);
 ```
 
-`NoSuchElementError` IS an `Error` subclass (inheritance: `globalThis.Error → YieldableError → TaggedError("NoSuchElementError") → NoSuchElementError`). It has `_tag: "NoSuchElementError"`, `name: "NoSuchElementError"`, and `stack`.
+`NoSuchElementError` IS an `Error` subclass (inheritance: `globalThis.Error → YieldableError → TaggedError("NoSuchElementError") → NoSuchElementError`). It has `_tag: "NoSuchElementError"`, `name: "NoSuchElementError"` (set on prototype, NOT an own property), and `stack`.
 
-**Through `runEffect` (Approach 2):** `Cause.squash` extracts `Fail[0].error` → the `NoSuchElementError` instance → it IS `instanceof Error` so `runEffect` throws it as-is (line 68-69 of `effect-services.ts`). TanStack Start serializes it fine. The client error boundary receives a valid `Error` object.
+**Through `runEffect` (Approach 2):** `Cause.squash` extracts `Fail[0].error` → the `NoSuchElementError` instance → it IS `instanceof Error` so `runEffect` throws it. But the error undergoes **two different serialization paths** depending on context:
 
-**Root cause of "An unexpected error occurred":** `NoSuchElementError()` (no arg) sets `.message` to `""` (empty string). The catch boundary (`default-catch-boundary.tsx:32`) does `error.message || "An unexpected error occurred"` — empty string is falsy → shows the generic fallback. The error IS properly serialized and delivered; it just has no message.
+### SSR path: `ShallowErrorPlugin` strips everything except `.message`
 
-**Key distinction:** This is NOT a serialization problem (which is what Approach 2 solves). The error passes through `runEffect` and TanStack Start correctly. The issue is purely that `NoSuchElementError` defaults to an empty message, and the catch boundary doesn't use `error.name` or `error._tag` as fallback.
+During SSR, the server fn is called directly (no HTTP round trip). The error is caught by the router, stored on the match, and **dehydrated to the client** via TanStack Router's `ShallowErrorPlugin` — a seroval plugin at `@tanstack/router-core/dist/esm/ssr/serializer/ShallowErrorPlugin.js`:
 
-**Fix options:**
+```ts
+// ShallowErrorPlugin — only serializes .message, nothing else
+const ShallowErrorPlugin = createPlugin({
+  tag: "$TSR/Error",
+  test(value) {
+    return value instanceof Error;
+  },
+  parse: {
+    sync(value, ctx) {
+      return { message: ctx.parse(value.message) };
+    },
+    // ...
+  },
+  serialize(node, ctx) {
+    return "new Error(" + ctx.serialize(node.message) + ")";
+  },
+  deserialize(node, ctx) {
+    return new Error(ctx.deserialize(node.message));
+  },
+});
+```
 
-1. **Fix the catch boundary fallback** to use `error.name` when `.message` is empty: `error.message || error.name || "An unexpected error occurred"` — shows "NoSuchElementError" instead of the generic message
-2. **Provide a message** at the call site: `Effect.fromNullishOr(session).pipe(Effect.mapError(() => new NoSuchElementError("Session required")))` — but still opaque to end users
-3. **Use `Effect.orElseFail` with a domain error**: `Effect.fromNullishOr(session).pipe(Effect.orElseFail(() => new SessionRequiredError()))` — typed, then handle in `runEffect` or the catch boundary
-4. **Handle in the Effect pipeline** before it reaches the boundary — e.g. `Effect.catch` to convert to a different error or a redirect via `Effect.die(redirect(...))`
+This plugin **only captures `.message`** — `.name`, `._tag`, `.stack`, and all custom properties are stripped. On the client it creates `new Error(message)`.
+
+For `NoSuchElementError` constructed without an argument:
+
+- Effect's `TaggedError` base sets `.name = "NoSuchElementError"` on the **prototype** (not own property)
+- The constructor calls `super({ message: undefined })`, and Effect's `Error` base does `Object.assign(this, { message: undefined })` — setting `.message = undefined` as an **own property**
+- `ShallowErrorPlugin.parse` captures `{ message: undefined }`
+- `ShallowErrorPlugin.deserialize` creates `new Error(undefined)` → `.name = "Error"`, `.message = ""`
+- Catch boundary: `"" || "An unexpected error occurred"` → shows the generic fallback
+
+### Client-side RPC path: seroval serialization
+
+When the server fn is called via HTTP (client-side navigation), TanStack Start serializes errors via seroval with its own plugins. The `ShallowErrorPlugin` also applies here (registered via `serovalPlugins` in the server fn handler).
+
+### Fix: normalize `.message` in `runEffect` (implemented)
+
+Since `ShallowErrorPlugin` only preserves `.message`, the fix is in `runEffect` — ensure the thrown Error always has a non-empty `.message` before it reaches any serialization boundary:
+
+```ts
+// src/lib/effect-services.ts
+const pretty = Cause.pretty(exit.cause);
+if (squashed instanceof Error) {
+  if (!squashed.message) squashed.message = squashed.name || pretty;
+  throw squashed;
+}
+throw new Error(pretty);
+```
+
+This handles Effect errors like `NoSuchElementError` that have `.name` set but `.message` empty/undefined. The error boundary receives `"NoSuchElementError"` (or the full `Cause.pretty` output) instead of an empty string.
 
 Note: `redirect`/`notFound` via `Effect.die` are for route-level control flow, NOT for server fns. Server fns should throw errors that the calling route's `errorComponent` can display.
