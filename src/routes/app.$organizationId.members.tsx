@@ -94,17 +94,19 @@ const getLoaderData = createServerFn({ method: "GET" })
  */
 const removeMember = createServerFn({ method: "POST" })
   .inputValidator(Schema.toStandardSchemaV1(removeMemberSchema))
-  .handler(
-    async ({
-      data: { organizationId, memberId },
-      context: { authService },
-    }) => {
-      const request = getRequest();
-      await authService.api.removeMember({
-        headers: request.headers,
-        body: { memberIdOrEmail: memberId, organizationId },
-      });
-    },
+  .handler(({ data: { organizationId, memberId }, context: { runEffect } }) =>
+    runEffect(
+      Effect.gen(function* () {
+        const request = getRequest();
+        const auth = yield* Auth;
+        yield* Effect.tryPromise(() =>
+          auth.api.removeMember({
+            headers: request.headers,
+            body: { memberIdOrEmail: memberId, organizationId },
+          }),
+        );
+      }),
+    ),
   );
 
 /**
@@ -112,30 +114,39 @@ const removeMember = createServerFn({ method: "POST" })
  */
 const leaveOrganization = createServerFn({ method: "POST" })
   .inputValidator(Schema.toStandardSchemaV1(organizationIdSchema))
-  .handler(async ({ data: { organizationId }, context: { authService } }) => {
-    const request = getRequest();
-    await authService.api.leaveOrganization({
-      headers: request.headers,
-      body: { organizationId },
-    });
-  });
+  .handler(({ data: { organizationId }, context: { runEffect } }) =>
+    runEffect(
+      Effect.gen(function* () {
+        const request = getRequest();
+        const auth = yield* Auth;
+        yield* Effect.tryPromise(() =>
+          auth.api.leaveOrganization({
+            headers: request.headers,
+            body: { organizationId },
+          }),
+        );
+      }),
+    ),
+  );
 
 /**
  * Authorization is enforced by better-auth updateMemberRole.
  */
 const updateMemberRole = createServerFn({ method: "POST" })
   .inputValidator(Schema.toStandardSchemaV1(updateMemberRoleSchema))
-  .handler(
-    async ({
-      data: { organizationId, memberId, role },
-      context: { authService },
-    }) => {
-      const request = getRequest();
-      await authService.api.updateMemberRole({
-        headers: request.headers,
-        body: { role, memberId, organizationId },
-      });
-    },
+  .handler(({ data: { organizationId, memberId, role }, context: { runEffect } }) =>
+    runEffect(
+      Effect.gen(function* () {
+        const request = getRequest();
+        const auth = yield* Auth;
+        yield* Effect.tryPromise(() =>
+          auth.api.updateMemberRole({
+            headers: request.headers,
+            body: { role, memberId, organizationId },
+          }),
+        );
+      }),
+    ),
   );
 
 function RouteComponent() {

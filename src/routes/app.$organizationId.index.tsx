@@ -23,6 +23,7 @@ import {
   ItemDescription,
   ItemTitle,
 } from "@/components/ui/item";
+import { Auth } from "@/lib/Auth";
 import { Repository } from "@/lib/Repository";
 
 const organizationIdSchema = Schema.Struct({ organizationId: Schema.String });
@@ -58,23 +59,37 @@ const getLoaderData = createServerFn({ method: "GET" })
 
 const acceptInvitation = createServerFn({ method: "POST" })
   .inputValidator(Schema.toStandardSchemaV1(invitationIdSchema))
-  .handler(async ({ data: { invitationId }, context: { authService } }) => {
-    const request = getRequest();
-    await authService.api.acceptInvitation({
-      headers: request.headers,
-      body: { invitationId },
-    });
-  });
+  .handler(({ data: { invitationId }, context: { runEffect } }) =>
+    runEffect(
+      Effect.gen(function* () {
+        const request = getRequest();
+        const auth = yield* Auth;
+        yield* Effect.tryPromise(() =>
+          auth.api.acceptInvitation({
+            headers: request.headers,
+            body: { invitationId },
+          }),
+        );
+      }),
+    ),
+  );
 
 const rejectInvitation = createServerFn({ method: "POST" })
   .inputValidator(Schema.toStandardSchemaV1(invitationIdSchema))
-  .handler(async ({ data: { invitationId }, context: { authService } }) => {
-    const request = getRequest();
-    await authService.api.rejectInvitation({
-      headers: request.headers,
-      body: { invitationId },
-    });
-  });
+  .handler(({ data: { invitationId }, context: { runEffect } }) =>
+    runEffect(
+      Effect.gen(function* () {
+        const request = getRequest();
+        const auth = yield* Auth;
+        yield* Effect.tryPromise(() =>
+          auth.api.rejectInvitation({
+            headers: request.headers,
+            body: { invitationId },
+          }),
+        );
+      }),
+    ),
+  );
 
 function RouteComponent() {
   const { userInvitations, memberCount, pendingInvitationCount } =

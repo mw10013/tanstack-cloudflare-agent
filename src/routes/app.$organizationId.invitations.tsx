@@ -43,6 +43,7 @@ import {
 } from "@/components/ui/select";
 import { Auth } from "@/lib/Auth";
 import * as Domain from "@/lib/Domain";
+import { Repository } from "@/lib/Repository";
 
 const emailPattern = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
@@ -154,35 +155,38 @@ const invitationIdSchema = Schema.Struct({ invitationId: Schema.String });
  */
 const invite = createServerFn({ method: "POST" })
   .inputValidator(Schema.toStandardSchemaV1(inviteSchema))
-  .handler(
-    async ({
-      data: { organizationId, emails, role },
-      context: { authService, repository },
-    }) => {
-      const request = getRequest();
-      for (const email of emails) {
-        const result = await authService.api.createInvitation({
-          headers: request.headers,
-          body: {
-            email,
-            role,
-            organizationId: organizationId,
-            resend: true,
-          },
-        });
-        // Workaround for better-auth createInvitation role bug.
-        // Occurs when a pending invitation exists and a new invitation is created with a different role.
-        if (result.role !== role) {
-          console.log(
-            `Applying workaround for better-auth createInvitation role bug: expected role ${role}, got ${result.role} for invitation ${result.id}`,
+  .handler(({ data: { organizationId, emails, role }, context: { runEffect } }) =>
+    runEffect(
+      Effect.gen(function* () {
+        const request = getRequest();
+        const auth = yield* Auth;
+        const repository = yield* Repository;
+        for (const email of emails) {
+          const result = yield* Effect.tryPromise(() =>
+            auth.api.createInvitation({
+              headers: request.headers,
+              body: {
+                email,
+                role,
+                organizationId,
+                resend: true,
+              },
+            }),
           );
-          await repository.updateInvitationRole({
-            invitationId: result.id,
-            role,
-          });
+          // Workaround for better-auth createInvitation role bug.
+          // Occurs when a pending invitation exists and a new invitation is created with a different role.
+          if (result.role !== role) {
+            console.log(
+              `Applying workaround for better-auth createInvitation role bug: expected role ${role}, got ${result.role} for invitation ${result.id}`,
+            );
+            yield* repository.updateInvitationRole({
+              invitationId: result.id,
+              role,
+            });
+          }
         }
-      }
-    },
+      }),
+    ),
   );
 
 function InviteForm({ organizationId }: { organizationId: string }) {
@@ -319,13 +323,20 @@ function InviteForm({ organizationId }: { organizationId: string }) {
  */
 const cancelInvitation = createServerFn({ method: "POST" })
   .inputValidator(Schema.toStandardSchemaV1(invitationIdSchema))
-  .handler(async ({ data: { invitationId }, context: { authService } }) => {
-    const request = getRequest();
-    await authService.api.cancelInvitation({
-      headers: request.headers,
-      body: { invitationId },
-    });
-  });
+  .handler(({ data: { invitationId }, context: { runEffect } }) =>
+    runEffect(
+      Effect.gen(function* () {
+        const request = getRequest();
+        const auth = yield* Auth;
+        yield* Effect.tryPromise(() =>
+          auth.api.cancelInvitation({
+            headers: request.headers,
+            body: { invitationId },
+          }),
+        );
+      }),
+    ),
+  );
 
 function InvitationItem({
   invitation,

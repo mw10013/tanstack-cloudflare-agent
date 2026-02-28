@@ -1,7 +1,6 @@
 import type { OrganizationAgent } from "@/organization-agent";
 import type { OrganizationMessage } from "@/organization-messages";
 import * as React from "react";
-import { invariant } from "@epic-web/invariant";
 import { useForm } from "@tanstack/react-form";
 import { useMutation } from "@tanstack/react-query";
 import {
@@ -78,53 +77,71 @@ const uploadFile = createServerFn({ method: "POST" })
     if (!(data instanceof FormData)) throw new Error("Expected FormData");
     return Schema.decodeUnknownSync(uploadFormSchema)(Object.fromEntries(data));
   })
-  .handler(async ({ context: { session, env }, data }) => {
-    invariant(session, "Missing session");
-    const organizationId = session.session.activeOrganizationId;
-    invariant(organizationId, "Missing active organization");
-    const key = `${organizationId}/${data.name}`;
-    const idempotencyKey = crypto.randomUUID();
-    await env.R2.put(key, data.file, {
-      httpMetadata: { contentType: data.file.type },
-      customMetadata: { organizationId, name: data.name, idempotencyKey },
-    });
-    if (env.ENVIRONMENT === "local") {
-      await env.R2_UPLOAD_QUEUE.send({
-        account: "local",
-        action: "PutObject",
-        bucket: env.R2_BUCKET_NAME,
-        object: { key, size: data.file.size, eTag: "local" },
-        eventTime: new Date().toISOString(),
-        idempotencyKey,
-      });
-    }
-    return {
-      success: true,
-      name: data.name,
-      size: data.file.size,
-      idempotencyKey,
-    };
-  });
+  .handler(({ context: { runEffect, session }, data }) =>
+    runEffect(
+      Effect.gen(function* () {
+        const validSession = yield* Effect.fromNullishOr(session);
+        const organizationId = yield* Effect.fromNullishOr(
+          validSession.session.activeOrganizationId,
+        );
+        const env = yield* CloudflareEnv;
+        const key = `${organizationId}/${data.name}`;
+        const idempotencyKey = crypto.randomUUID();
+        yield* Effect.tryPromise(() =>
+          env.R2.put(key, data.file, {
+            httpMetadata: { contentType: data.file.type },
+            customMetadata: { organizationId, name: data.name, idempotencyKey },
+          }),
+        );
+        if (env.ENVIRONMENT === "local") {
+          yield* Effect.tryPromise(() =>
+            env.R2_UPLOAD_QUEUE.send({
+              account: "local",
+              action: "PutObject",
+              bucket: env.R2_BUCKET_NAME,
+              object: { key, size: data.file.size, eTag: "local" },
+              eventTime: new Date().toISOString(),
+              idempotencyKey,
+            }),
+          );
+        }
+        return {
+          success: true,
+          name: data.name,
+          size: data.file.size,
+          idempotencyKey,
+        };
+      }),
+    ),
+  );
 
 const deleteUpload = createServerFn({ method: "POST" })
   .inputValidator(Schema.toStandardSchemaV1(deleteUploadSchema))
-  .handler(async ({ context: { session, env }, data }) => {
-    invariant(session, "Missing session");
-    const organizationId = session.session.activeOrganizationId;
-    invariant(organizationId, "Missing active organization");
-    const key = `${organizationId}/${data.name}`;
-    await env.R2.delete(key);
-    if (env.ENVIRONMENT === "local") {
-      await env.R2_UPLOAD_QUEUE.send({
-        account: "local",
-        action: "DeleteObject",
-        bucket: env.R2_BUCKET_NAME,
-        object: { key },
-        eventTime: new Date().toISOString(),
-      });
-    }
-    return { success: true, name: data.name };
-  });
+  .handler(({ context: { runEffect, session }, data }) =>
+    runEffect(
+      Effect.gen(function* () {
+        const validSession = yield* Effect.fromNullishOr(session);
+        const organizationId = yield* Effect.fromNullishOr(
+          validSession.session.activeOrganizationId,
+        );
+        const env = yield* CloudflareEnv;
+        const key = `${organizationId}/${data.name}`;
+        yield* Effect.tryPromise(() => env.R2.delete(key));
+        if (env.ENVIRONMENT === "local") {
+          yield* Effect.tryPromise(() =>
+            env.R2_UPLOAD_QUEUE.send({
+              account: "local",
+              action: "DeleteObject",
+              bucket: env.R2_BUCKET_NAME,
+              object: { key },
+              eventTime: new Date().toISOString(),
+            }),
+          );
+        }
+        return { success: true, name: data.name };
+      }),
+    ),
+  );
 
 const getUploads = createServerFn({ method: "GET" })
   .inputValidator(Schema.toStandardSchemaV1(organizationIdSchema))

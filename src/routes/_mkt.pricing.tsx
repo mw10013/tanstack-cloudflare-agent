@@ -1,5 +1,4 @@
 import * as React from "react";
-import { invariant } from "@epic-web/invariant";
 import { useMutation } from "@tanstack/react-query";
 import {
   createFileRoute,
@@ -14,6 +13,7 @@ import * as Schema from "effect/Schema";
 import { AlertCircle } from "lucide-react";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
+import { Auth } from "@/lib/Auth";
 import { Switch } from "@/components/ui/switch";
 import { Stripe } from "@/lib/Stripe";
 
@@ -45,81 +45,82 @@ const upgradeSubscriptionServerFn = createServerFn({ method: "POST" })
     ),
   )
   .handler(
-    async ({
-      data: { intent },
-      context: { authService, session, stripeService },
-    }) => {
-      if (!session) {
-        // eslint-disable-next-line @typescript-eslint/only-throw-error
-        throw redirect({ to: "/login" });
-      }
-      if (session.user.role !== "user") {
-        throw new Error("Forbidden");
-      }
-
-      const plans = await stripeService.getPlans();
-      const plan = plans.find(
-        (p) =>
-          p.monthlyPriceLookupKey === intent ||
-          p.annualPriceLookupKey === intent,
-      );
-      if (!plan) {
-        // eslint-disable-next-line @typescript-eslint/only-throw-error
-        throw notFound();
-      }
-
-      const activeOrganizationId = session.session.activeOrganizationId;
-      invariant(activeOrganizationId, "Missing activeOrganizationId");
-
-      const request = getRequest();
-      const subscriptions = await authService.api.listActiveSubscriptions({
-        headers: request.headers,
-        query: {
-          referenceId: activeOrganizationId,
-          customerType: "organization",
-        },
-      });
-      const subscriptionId =
-        subscriptions.length > 0
-          ? subscriptions[0].stripeSubscriptionId
-          : undefined;
-
-      console.log(`pricing: upgradeSubscription`, {
-        plan: plan.name,
-        subscriptionId,
-      });
-
-      const { url, redirect: isRedirect } = await authService.api
-        .upgradeSubscription({
-          headers: request.headers,
-          body: {
+    ({ data: { intent }, context: { runEffect, session } }) =>
+      runEffect(
+        Effect.gen(function* () {
+          if (!session) {
+            return yield* Effect.die(redirect({ to: "/login" }));
+          }
+          if (session.user.role !== "user") {
+            return yield* Effect.fail(new Error("Forbidden"));
+          }
+          const stripe = yield* Stripe;
+          const auth = yield* Auth;
+          const plans = yield* stripe.getPlans();
+          const plan = plans.find(
+            (p) =>
+              p.monthlyPriceLookupKey === intent ||
+              p.annualPriceLookupKey === intent,
+          );
+          if (!plan) {
+            return yield* Effect.die(notFound());
+          }
+          const activeOrganizationId = yield* Effect.fromNullishOr(
+            session.session.activeOrganizationId,
+          );
+          const request = getRequest();
+          const subscriptions = yield* Effect.tryPromise(() =>
+            auth.api.listActiveSubscriptions({
+              headers: request.headers,
+              query: {
+                referenceId: activeOrganizationId,
+                customerType: "organization",
+              },
+            }),
+          );
+          const subscriptionId =
+            subscriptions.length > 0
+              ? subscriptions[0].stripeSubscriptionId
+              : undefined;
+          console.log(`pricing: upgradeSubscription`, {
             plan: plan.name,
-            annual: intent === plan.annualPriceLookupKey,
-            referenceId: activeOrganizationId,
-            customerType: "organization",
             subscriptionId,
-            seats: 1,
-            successUrl: "/app",
-            cancelUrl: "/pricing",
-            returnUrl: `/app/${activeOrganizationId}`,
-            disableRedirect: false,
-          },
-        })
-        .catch((error: unknown) => {
-          console.error("pricing: upgradeSubscription failed", error);
-          throw error;
-        });
-
-      console.log(`pricing: upgradeSubscription`, { isRedirect, url });
-      if (!isRedirect || !url) {
-        throw new Error("Failed to create checkout session");
-      }
-
-      // eslint-disable-next-line @typescript-eslint/only-throw-error
-      throw redirect({
-        href: url,
-      });
-    },
+          });
+          const { url, redirect: isRedirect } = yield* Effect.tryPromise(() =>
+            auth.api
+              .upgradeSubscription({
+                headers: request.headers,
+                body: {
+                  plan: plan.name,
+                  annual: intent === plan.annualPriceLookupKey,
+                  referenceId: activeOrganizationId,
+                  customerType: "organization",
+                  subscriptionId,
+                  seats: 1,
+                  successUrl: "/app",
+                  cancelUrl: "/pricing",
+                  returnUrl: `/app/${activeOrganizationId}`,
+                  disableRedirect: false,
+                },
+              })
+              .catch((error: unknown) => {
+                console.error("pricing: upgradeSubscription failed", error);
+                throw error;
+              }),
+          );
+          console.log(`pricing: upgradeSubscription`, { isRedirect, url });
+          if (!isRedirect || !url) {
+            return yield* Effect.fail(
+              new Error("Failed to create checkout session"),
+            );
+          }
+          return yield* Effect.die(
+            redirect({
+              href: url,
+            }),
+          );
+        }),
+      ),
   );
 
 function RouteComponent() {

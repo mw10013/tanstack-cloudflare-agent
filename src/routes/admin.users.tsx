@@ -61,6 +61,7 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
+import { Auth } from "@/lib/Auth";
 import { Repository } from "@/lib/Repository";
 
 const LIMIT = 5;
@@ -115,26 +116,39 @@ export const Route = createFileRoute("/admin/users")({
 
 export const unbanUser = createServerFn({ method: "POST" })
   .inputValidator(Schema.toStandardSchemaV1(userIdSchema))
-  .handler(async ({ data, context: { authService } }) => {
-    const request = getRequest();
-    await authService.api.unbanUser({
-      headers: request.headers,
-      body: { userId: data.userId },
-    });
-    return { success: true };
-  });
+  .handler(({ data, context: { runEffect } }) =>
+    runEffect(
+      Effect.gen(function* () {
+        const request = getRequest();
+        const auth = yield* Auth;
+        yield* Effect.tryPromise(() =>
+          auth.api.unbanUser({
+            headers: request.headers,
+            body: { userId: data.userId },
+          }),
+        );
+        return { success: true };
+      }),
+    ),
+  );
 
 export const impersonateUser = createServerFn({ method: "POST" })
   .inputValidator(Schema.toStandardSchemaV1(userIdSchema))
-  .handler(async ({ data, context: { authService } }) => {
-    const request = getRequest();
-    await authService.api.impersonateUser({
-      headers: request.headers,
-      body: { userId: data.userId },
-    });
-    // eslint-disable-next-line @typescript-eslint/only-throw-error
-    throw redirect({ to: "/app" });
-  });
+  .handler(({ data, context: { runEffect } }) =>
+    runEffect(
+      Effect.gen(function* () {
+        const request = getRequest();
+        const auth = yield* Auth;
+        yield* Effect.tryPromise(() =>
+          auth.api.impersonateUser({
+            headers: request.headers,
+            body: { userId: data.userId },
+          }),
+        );
+        return yield* Effect.die(redirect({ to: "/app" }));
+      }),
+    ),
+  );
 
 function RouteComponent() {
   const router = useRouter();
@@ -353,17 +367,24 @@ const banUserSchema = Schema.Struct({
 
 export const banUser = createServerFn({ method: "POST" })
   .inputValidator(Schema.toStandardSchemaV1(banUserSchema))
-  .handler(async ({ data, context: { authService } }) => {
-    const request = getRequest();
-    await authService.api.banUser({
-      headers: request.headers,
-      body: {
-        userId: data.userId,
-        banReason: data.banReason,
-      },
-    });
-    return { success: true };
-  });
+  .handler(({ data, context: { runEffect } }) =>
+    runEffect(
+      Effect.gen(function* () {
+        const request = getRequest();
+        const auth = yield* Auth;
+        yield* Effect.tryPromise(() =>
+          auth.api.banUser({
+            headers: request.headers,
+            body: {
+              userId: data.userId,
+              banReason: data.banReason,
+            },
+          }),
+        );
+        return { success: true };
+      }),
+    ),
+  );
 
 function BanDialog({
   userId,

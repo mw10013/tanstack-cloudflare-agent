@@ -260,42 +260,48 @@ function NoSubscriptionCard() {
  */
 const manageBilling = createServerFn({ method: "POST" })
   .inputValidator(Schema.toStandardSchemaV1(organizationIdSchema))
-  .handler(async ({ data: { organizationId }, context: { authService } }) => {
-    const request = getRequest();
-    const result = await authService.api.createBillingPortal({
-      headers: request.headers,
-      body: {
-        referenceId: organizationId,
-        customerType: "organization",
-        returnUrl: `${new URL(request.url).origin}/app/${organizationId}/billing`,
-      },
-    });
-    return result;
-  });
+  .handler(({ data: { organizationId }, context: { runEffect } }) =>
+    runEffect(
+      Effect.gen(function* () {
+        const request = getRequest();
+        const auth = yield* Auth;
+        return yield* Effect.tryPromise(() =>
+          auth.api.createBillingPortal({
+            headers: request.headers,
+            body: {
+              referenceId: organizationId,
+              customerType: "organization",
+              returnUrl: `${new URL(request.url).origin}/app/${organizationId}/billing`,
+            },
+          }),
+        );
+      }),
+    ),
+  );
 
 /**
  * Authorization is enforced by better-auth cancelSubscription.
  */
 const cancelSubscription = createServerFn({ method: "POST" })
   .inputValidator(Schema.toStandardSchemaV1(subscriptionActionSchema))
-  .handler(
-    async ({
-      data: { organizationId, subscriptionId },
-      context: { authService },
-    }) => {
-      const request = getRequest();
-      const result = await authService.api.cancelSubscription({
-        headers: request.headers,
-        body: {
-          referenceId: organizationId,
-          customerType: "organization",
-          subscriptionId,
-          returnUrl: `${new URL(request.url).origin}/app/${organizationId}/billing`,
-        },
-      });
-
-      return result;
-    },
+  .handler(({ data: { organizationId, subscriptionId }, context: { runEffect } }) =>
+    runEffect(
+      Effect.gen(function* () {
+        const request = getRequest();
+        const auth = yield* Auth;
+        return yield* Effect.tryPromise(() =>
+          auth.api.cancelSubscription({
+            headers: request.headers,
+            body: {
+              referenceId: organizationId,
+              customerType: "organization",
+              subscriptionId,
+              returnUrl: `${new URL(request.url).origin}/app/${organizationId}/billing`,
+            },
+          }),
+        );
+      }),
+    ),
   );
 
 /**
@@ -303,19 +309,21 @@ const cancelSubscription = createServerFn({ method: "POST" })
  */
 const restoreSubscription = createServerFn({ method: "POST" })
   .inputValidator(Schema.toStandardSchemaV1(subscriptionActionSchema))
-  .handler(
-    async ({
-      data: { organizationId, subscriptionId },
-      context: { authService },
-    }) => {
-      const request = getRequest();
-      await authService.api.restoreSubscription({
-        headers: request.headers,
-        body: {
-          referenceId: organizationId,
-          customerType: "organization",
-          subscriptionId,
-        },
-      });
-    },
+  .handler(({ data: { organizationId, subscriptionId }, context: { runEffect } }) =>
+    runEffect(
+      Effect.gen(function* () {
+        const request = getRequest();
+        const auth = yield* Auth;
+        yield* Effect.tryPromise(() =>
+          auth.api.restoreSubscription({
+            headers: request.headers,
+            body: {
+              referenceId: organizationId,
+              customerType: "organization",
+              subscriptionId,
+            },
+          }),
+        );
+      }),
+    ),
   );

@@ -1,5 +1,4 @@
 import type { OrganizationAgent } from "@/organization-agent";
-import { invariant } from "@epic-web/invariant";
 import { useMutation } from "@tanstack/react-query";
 import {
   createFileRoute,
@@ -9,6 +8,7 @@ import {
 import { createServerFn, useServerFn } from "@tanstack/react-start";
 import { useAgent } from "agents/react";
 import * as React from "react";
+import { Effect } from "effect";
 import * as Schema from "effect/Schema";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
@@ -21,6 +21,7 @@ import {
 } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { buildGoogleAuthorizationRequest } from "@/lib/google-oauth-client";
+import { CloudflareEnv } from "@/lib/effect-services";
 
 const searchSchema = Schema.Struct({
   google: Schema.optionalKey(
@@ -48,40 +49,46 @@ interface SelectedSpreadsheetData {
 }
 
 const beginGoogleConnect = createServerFn({ method: "POST" })
-  .handler(async ({ context: { session, env } }) => {
-    invariant(session, "Missing session");
-    const organizationId = session.session.activeOrganizationId;
-    invariant(organizationId, "Missing active organization");
-    invariant(env.GOOGLE_OAUTH_CLIENT_ID, "Missing GOOGLE_OAUTH_CLIENT_ID");
-    invariant(
-      env.GOOGLE_OAUTH_CLIENT_SECRET,
-      "Missing GOOGLE_OAUTH_CLIENT_SECRET",
-    );
-    invariant(
-      env.GOOGLE_OAUTH_REDIRECT_URI,
-      "Missing GOOGLE_OAUTH_REDIRECT_URI",
-    );
-    const id = env.ORGANIZATION_AGENT.idFromName(organizationId);
-    const stub = env.ORGANIZATION_AGENT.get(id);
-
-    const oauth = await buildGoogleAuthorizationRequest({
-      clientId: env.GOOGLE_OAUTH_CLIENT_ID,
-      clientSecret: env.GOOGLE_OAUTH_CLIENT_SECRET,
-      redirectUri: env.GOOGLE_OAUTH_REDIRECT_URI,
-      scope: [
-        "https://www.googleapis.com/auth/drive.readonly",
-        "https://www.googleapis.com/auth/spreadsheets",
-        "https://www.googleapis.com/auth/documents",
-      ],
-    });
-
-    await stub.beginGoogleOAuth({
-      state: oauth.state,
-      codeVerifier: oauth.codeVerifier,
-      expiresAt: Date.now() + 10 * 60 * 1000,
-    });
-    return { url: oauth.authorizationUrl };
-  });
+  .handler(({ context: { runEffect, session } }) =>
+    runEffect(
+      Effect.gen(function* () {
+        const validSession = yield* Effect.fromNullishOr(session);
+        const organizationId = yield* Effect.fromNullishOr(
+          validSession.session.activeOrganizationId,
+        );
+        const env = yield* CloudflareEnv;
+        const clientId = yield* Effect.fromNullishOr(env.GOOGLE_OAUTH_CLIENT_ID);
+        const clientSecret = yield* Effect.fromNullishOr(
+          env.GOOGLE_OAUTH_CLIENT_SECRET,
+        );
+        const redirectUri = yield* Effect.fromNullishOr(
+          env.GOOGLE_OAUTH_REDIRECT_URI,
+        );
+        const id = env.ORGANIZATION_AGENT.idFromName(organizationId);
+        const stub = env.ORGANIZATION_AGENT.get(id);
+        const oauth = yield* Effect.tryPromise(() =>
+          buildGoogleAuthorizationRequest({
+            clientId,
+            clientSecret,
+            redirectUri,
+            scope: [
+              "https://www.googleapis.com/auth/drive.readonly",
+              "https://www.googleapis.com/auth/spreadsheets",
+              "https://www.googleapis.com/auth/documents",
+            ],
+          }),
+        );
+        yield* Effect.tryPromise(() =>
+          stub.beginGoogleOAuth({
+            state: oauth.state,
+            codeVerifier: oauth.codeVerifier,
+            expiresAt: Date.now() + 10 * 60 * 1000,
+          }),
+        );
+        return { url: oauth.authorizationUrl };
+      }),
+    ),
+  );
 
 export const Route = createFileRoute("/app/$organizationId/google")({
   validateSearch: Schema.toStandardSchemaV1(searchSchema),
