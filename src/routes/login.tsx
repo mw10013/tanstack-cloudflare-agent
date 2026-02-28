@@ -3,6 +3,7 @@ import { useMutation } from "@tanstack/react-query";
 import { createFileRoute, useHydrated } from "@tanstack/react-router";
 import { createServerFn, useServerFn } from "@tanstack/react-start";
 import { getRequest } from "@tanstack/react-start/server";
+import { Effect } from "effect";
 import * as Schema from "effect/Schema";
 import { AlertCircle } from "lucide-react";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
@@ -21,6 +22,7 @@ import {
   FieldLabel,
 } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
+import { CloudflareEnv } from "@/lib/effect-services";
 
 export const Route = createFileRoute("/login")({
   loader: () => getLoaderData(),
@@ -28,14 +30,18 @@ export const Route = createFileRoute("/login")({
 });
 
 const getLoaderData = createServerFn({ method: "GET" }).handler(
-  // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition
-  ({ context: { env } }) => ({ isDemoMode: env.DEMO_MODE === "true" }),
+  ({ context: { runEffect } }) =>
+    runEffect(
+      Effect.gen(function* () {
+        const env = yield* CloudflareEnv;
+        // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition
+        return { isDemoMode: env.DEMO_MODE === "true" };
+      }),
+    ),
 );
 
 const loginSchema = Schema.Struct({
-  email: Schema.String.check(
-    Schema.isPattern(/^[^\s@]+@[^\s@]+\.[^\s@]+$/),
-  ),
+  email: Schema.String.check(Schema.isPattern(/^[^\s@]+@[^\s@]+\.[^\s@]+$/)),
 });
 
 export const login = createServerFn({

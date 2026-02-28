@@ -1,21 +1,18 @@
 import { createFileRoute, Outlet, redirect } from "@tanstack/react-router";
 import { createServerFn } from "@tanstack/react-start";
+import { Effect } from "effect";
 
 const beforeLoadServerFn = createServerFn().handler(
-  ({ context: { session } }) => {
-    if (!session?.user) {
-      // eslint-disable-next-line @typescript-eslint/only-throw-error
-      throw redirect({ to: "/login" });
-    }
-    if (session.user.role !== "user") {
-      // Cannot throw Response directly - TanStack Start serializes errors to transfer
-      // from server to client, and Response contains non-serializable properties
-      // (ReadableStream, Headers, etc.).
-      // eslint-disable-next-line @typescript-eslint/only-throw-error
-      throw redirect({ to: "/" });
-    }
-    return { sessionUser: session.user };
-  },
+  ({ context: { runEffect, session } }) =>
+    runEffect(
+      Effect.gen(function* () {
+        if (!session?.user)
+          return yield* Effect.die(redirect({ to: "/login" }));
+        if (session.user.role !== "user")
+          return yield* Effect.die(redirect({ to: "/" }));
+        return { sessionUser: session.user };
+      }),
+    ),
 );
 
 export const Route = createFileRoute("/app")({

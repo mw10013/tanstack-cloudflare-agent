@@ -8,8 +8,9 @@ import {
 } from "@tanstack/react-router";
 import { createServerFn, useServerFn } from "@tanstack/react-start";
 import { getRequest } from "@tanstack/react-start/server";
-import { AlertCircle } from "lucide-react";
+import { Effect } from "effect";
 import * as Schema from "effect/Schema";
+import { AlertCircle } from "lucide-react";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import {
@@ -19,6 +20,7 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
+import { Auth } from "@/lib/Auth";
 
 const organizationIdSchema = Schema.Struct({ organizationId: Schema.String });
 
@@ -34,25 +36,33 @@ export const Route = createFileRoute("/app/$organizationId/billing")({
 
 const getLoaderData = createServerFn({ method: "GET" })
   .inputValidator(Schema.toStandardSchemaV1(organizationIdSchema))
-  .handler(async ({ data: { organizationId }, context: { authService } }) => {
-    const request = getRequest();
-    const subscriptions = await authService.api.listActiveSubscriptions({
-      headers: request.headers,
-      query: { referenceId: organizationId, customerType: "organization" },
-    });
-
-    const activeSubscription = subscriptions.find(
-      (v) => v.status === "active" || v.status === "trialing",
-    );
-
-    return {
-      // `limits` is typed as `Record<string, unknown>` in better-auth's stripe plugin.
-      // TanStack Start server function results must be serializable (no `unknown`), so we omit it.
-      activeSubscription: activeSubscription
-        ? (({ limits: _limits, ...rest }) => rest)(activeSubscription)
-        : undefined,
-    };
-  });
+  .handler(({ data: { organizationId }, context: { runEffect } }) =>
+    runEffect(
+      Effect.gen(function* () {
+        const request = getRequest();
+        const auth = yield* Auth;
+        const subscriptions = yield* Effect.tryPromise(() =>
+          auth.api.listActiveSubscriptions({
+            headers: request.headers,
+            query: {
+              referenceId: organizationId,
+              customerType: "organization",
+            },
+          }),
+        );
+        const activeSubscription = subscriptions.find(
+          (v) => v.status === "active" || v.status === "trialing",
+        );
+        return {
+          // `limits` is typed as `Record<string, unknown>` in better-auth's stripe plugin.
+          // TanStack Start server function results must be serializable (no `unknown`), so we omit it.
+          activeSubscription: activeSubscription
+            ? (({ limits: _limits, ...rest }) => rest)(activeSubscription)
+            : undefined,
+        };
+      }),
+    ),
+  );
 
 function RouteComponent() {
   const { activeSubscription } = Route.useLoaderData();

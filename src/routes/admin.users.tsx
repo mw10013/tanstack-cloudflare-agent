@@ -9,6 +9,7 @@ import {
 } from "@tanstack/react-router";
 import { createServerFn, useServerFn } from "@tanstack/react-start";
 import { getRequest } from "@tanstack/react-start/server";
+import { Effect } from "effect";
 import * as Schema from "effect/Schema";
 import {
   AlertCircle,
@@ -60,6 +61,7 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
+import { Repository } from "@/lib/Repository";
 
 const LIMIT = 5;
 
@@ -67,9 +69,9 @@ const userSearchSchema = Schema.Struct({
   page: Schema.Union([
     Schema.Int,
     Schema.NumberFromString.check(Schema.isInt()),
-  ]).check(Schema.isGreaterThanOrEqualTo(1)).pipe(
-    Schema.withDecodingDefaultKey(() => 1),
-  ),
+  ])
+    .check(Schema.isGreaterThanOrEqualTo(1))
+    .pipe(Schema.withDecodingDefaultKey(() => 1)),
   filter: Schema.optional(Schema.Trim),
 });
 
@@ -77,21 +79,21 @@ const userIdSchema = Schema.Struct({ userId: Schema.String });
 
 export const getUsers = createServerFn({ method: "GET" })
   .inputValidator(Schema.toStandardSchemaV1(userSearchSchema))
-  .handler(async ({ data, context: { repository } }) => {
+  .handler(async ({ data, context: { runEffect } }) => {
     const { page, filter } = data;
     const offset = (page - 1) * LIMIT;
-    const result = await repository.getUsers({
-      limit: LIMIT,
-      offset,
-      searchValue: filter && filter !== "" ? filter : undefined,
-    });
-    const pageCount = Math.max(1, Math.ceil(result.count / LIMIT));
-    return {
-      users: result.users,
-      page,
-      pageCount,
-      filter,
-    };
+    return runEffect(
+      Effect.gen(function* () {
+        const repository = yield* Repository;
+        const result = yield* repository.getUsers({
+          limit: LIMIT,
+          offset,
+          searchValue: filter && filter !== "" ? filter : undefined,
+        });
+        const pageCount = Math.max(1, Math.ceil(result.count / LIMIT));
+        return { users: result.users, page, pageCount, filter };
+      }),
+    );
   });
 
 export const Route = createFileRoute("/admin/users")({

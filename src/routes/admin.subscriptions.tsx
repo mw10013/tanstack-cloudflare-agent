@@ -1,6 +1,7 @@
 import * as React from "react";
 import { createFileRoute, redirect, useRouter } from "@tanstack/react-router";
 import { createServerFn } from "@tanstack/react-start";
+import { Effect } from "effect";
 import * as Schema from "effect/Schema";
 import { ChevronLeftIcon, ChevronRightIcon, Search } from "lucide-react";
 import {
@@ -24,6 +25,7 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
+import { Repository } from "@/lib/Repository";
 
 const LIMIT = 20;
 
@@ -31,29 +33,29 @@ const subscriptionSearchSchema = Schema.Struct({
   page: Schema.Union([
     Schema.Int,
     Schema.NumberFromString.check(Schema.isInt()),
-  ]).check(Schema.isGreaterThanOrEqualTo(1)).pipe(
-    Schema.withDecodingDefaultKey(() => 1),
-  ),
+  ])
+    .check(Schema.isGreaterThanOrEqualTo(1))
+    .pipe(Schema.withDecodingDefaultKey(() => 1)),
   filter: Schema.optional(Schema.Trim),
 });
 
 export const getSubscriptions = createServerFn({ method: "GET" })
   .inputValidator(Schema.toStandardSchemaV1(subscriptionSearchSchema))
-  .handler(async ({ data, context: { repository } }) => {
+  .handler(async ({ data, context: { runEffect } }) => {
     const { page, filter } = data;
     const offset = (page - 1) * LIMIT;
-    const result = await repository.getSubscriptions({
-      limit: LIMIT,
-      offset,
-      searchValue: filter && filter !== "" ? filter : undefined,
-    });
-    const pageCount = Math.max(1, Math.ceil(result.count / LIMIT));
-    return {
-      subscriptions: result.subscriptions,
-      page,
-      pageCount,
-      filter,
-    };
+    return runEffect(
+      Effect.gen(function* () {
+        const repository = yield* Repository;
+        const result = yield* repository.getSubscriptions({
+          limit: LIMIT,
+          offset,
+          searchValue: filter && filter !== "" ? filter : undefined,
+        });
+        const pageCount = Math.max(1, Math.ceil(result.count / LIMIT));
+        return { subscriptions: result.subscriptions, page, pageCount, filter };
+      }),
+    );
   });
 
 export const Route = createFileRoute("/admin/subscriptions")({

@@ -7,6 +7,7 @@ import {
 } from "@tanstack/react-router";
 import { createServerFn, useServerFn } from "@tanstack/react-start";
 import { getRequest } from "@tanstack/react-start/server";
+import { Effect } from "effect";
 import * as Schema from "effect/Schema";
 import * as SchemaTransformation from "effect/SchemaTransformation";
 import { AlertCircle } from "lucide-react";
@@ -40,6 +41,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { Auth } from "@/lib/Auth";
 import * as Domain from "@/lib/Domain";
 
 const emailPattern = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
@@ -57,22 +59,30 @@ export const Route = createFileRoute("/app/$organizationId/invitations")({
 
 const getLoaderData = createServerFn({ method: "GET" })
   .inputValidator((data: { organizationId: string }) => data)
-  .handler(async ({ data, context: { authService } }) => {
-    const request = getRequest();
-    const { success: canManageInvitations } =
-      await authService.api.hasPermission({
-        headers: request.headers,
-        body: {
-          organizationId: data.organizationId,
-          permissions: { invitation: ["create", "cancel"] },
-        },
-      });
-    const invitations = await authService.api.listInvitations({
-      headers: request.headers,
-      query: { organizationId: data.organizationId },
-    });
-    return { canManageInvitations, invitations };
-  });
+  .handler(({ data, context: { runEffect } }) =>
+    runEffect(
+      Effect.gen(function* () {
+        const request = getRequest();
+        const auth = yield* Auth;
+        const { success: canManageInvitations } = yield* Effect.tryPromise(() =>
+          auth.api.hasPermission({
+            headers: request.headers,
+            body: {
+              organizationId: data.organizationId,
+              permissions: { invitation: ["create", "cancel"] },
+            },
+          }),
+        );
+        const invitations = yield* Effect.tryPromise(() =>
+          auth.api.listInvitations({
+            headers: request.headers,
+            query: { organizationId: data.organizationId },
+          }),
+        );
+        return { canManageInvitations, invitations };
+      }),
+    ),
+  );
 
 function RouteComponent() {
   const { canManageInvitations, invitations } = Route.useLoaderData();

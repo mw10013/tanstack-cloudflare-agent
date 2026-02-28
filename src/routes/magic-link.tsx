@@ -1,19 +1,18 @@
 import { createFileRoute, redirect } from "@tanstack/react-router";
 import { createServerFn } from "@tanstack/react-start";
+import { Effect } from "effect";
 
 export const verifyMagicLinkFn = createServerFn({ method: "GET" }).handler(
-  ({ context: { session } }) => {
-    if (session?.user.role === "admin") {
-      // eslint-disable-next-line @typescript-eslint/only-throw-error
-      throw redirect({ to: "/admin" });
-    } else if (session?.user.role === "user") {
-      // eslint-disable-next-line @typescript-eslint/only-throw-error
-      throw redirect({ to: "/app" });
-    }
-    return {
-      error: `Invalid role: ${session?.user.role ?? "unknown"}`,
-    };
-  },
+  ({ context: { runEffect, session } }) =>
+    runEffect(
+      Effect.gen(function* () {
+        if (session?.user.role === "admin")
+          return yield* Effect.die(redirect({ to: "/admin" }));
+        if (session?.user.role === "user")
+          return yield* Effect.die(redirect({ to: "/app" }));
+        return { error: `Invalid role: ${session?.user.role ?? "unknown"}` };
+      }),
+    ),
 );
 
 export const Route = createFileRoute("/magic-link")({

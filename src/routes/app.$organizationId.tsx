@@ -1,5 +1,4 @@
 import type { AuthService } from "@/lib/auth-service";
-import { invariant } from "@epic-web/invariant";
 import {
   createFileRoute,
   Link,
@@ -9,6 +8,7 @@ import {
 } from "@tanstack/react-router";
 import { createServerFn, useServerFn } from "@tanstack/react-start";
 import { getRequest } from "@tanstack/react-start/server";
+import { Effect } from "effect";
 import { ChevronsUpDown, LogOut } from "lucide-react";
 import { AppLogo } from "@/components/app-logo";
 import { Button } from "@/components/ui/button";
@@ -34,32 +34,30 @@ import {
   SidebarProvider,
   SidebarTrigger,
 } from "@/components/ui/sidebar";
+import { Auth } from "@/lib/Auth";
 import { signOutServerFn } from "@/lib/auth-service";
 
 const beforeLoadServerFn = createServerFn({ method: "GET" })
   .inputValidator((organizationId: string) => organizationId)
-  .handler(async ({ context: { session, authService }, data }) => {
-    invariant(session, "Missing session");
-
-    const request = getRequest();
-
-    const organizations = await authService.api.listOrganizations({
-      headers: request.headers,
-    });
-
-    const organization = organizations.find((org) => org.id === data);
-
-    if (!organization) {
-      // eslint-disable-next-line @typescript-eslint/only-throw-error
-      throw notFound();
-    }
-
-    return {
-      organization,
-      organizations,
-      sessionUser: session.user,
-    };
-  });
+  .handler(({ context: { runEffect, session }, data }) =>
+    runEffect(
+      Effect.gen(function* () {
+        const validSession = yield* Effect.fromNullishOr(session);
+        const request = getRequest();
+        const auth = yield* Auth;
+        const organizations = yield* Effect.tryPromise(() =>
+          auth.api.listOrganizations({ headers: request.headers }),
+        );
+        const organization = organizations.find((org) => org.id === data);
+        if (!organization) return yield* Effect.die(notFound());
+        return {
+          organization,
+          organizations,
+          sessionUser: validSession.user,
+        };
+      }),
+    ),
+  );
 
 export const Route = createFileRoute("/app/$organizationId")({
   beforeLoad: async ({ params }) =>

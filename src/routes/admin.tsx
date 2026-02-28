@@ -6,6 +6,7 @@ import {
   useMatchRoute,
 } from "@tanstack/react-router";
 import { createServerFn, useServerFn } from "@tanstack/react-start";
+import { Effect } from "effect";
 import { ChevronsUpDown, LogOut } from "lucide-react";
 import { AppLogo } from "@/components/app-logo";
 import { Button } from "@/components/ui/button";
@@ -34,17 +35,16 @@ import {
 import { signOutServerFn } from "@/lib/auth-service";
 
 const beforeLoadServerFn = createServerFn().handler(
-  ({ context: { session } }) => {
-    if (!session?.user) {
-      // eslint-disable-next-line @typescript-eslint/only-throw-error
-      throw redirect({ to: "/login" });
-    }
-    if (session.user.role !== "admin") {
-      // eslint-disable-next-line @typescript-eslint/only-throw-error
-      throw redirect({ to: "/" });
-    }
-    return { sessionUser: session.user };
-  },
+  ({ context: { runEffect, session } }) =>
+    runEffect(
+      Effect.gen(function* () {
+        if (!session?.user)
+          return yield* Effect.die(redirect({ to: "/login" }));
+        if (session.user.role !== "admin")
+          return yield* Effect.die(redirect({ to: "/" }));
+        return { sessionUser: session.user };
+      }),
+    ),
 );
 
 export const Route = createFileRoute("/admin")({

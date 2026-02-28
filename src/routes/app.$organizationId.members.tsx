@@ -1,8 +1,8 @@
-import { invariant } from "@epic-web/invariant";
 import { useMutation } from "@tanstack/react-query";
 import { createFileRoute, useRouter } from "@tanstack/react-router";
 import { createServerFn, useServerFn } from "@tanstack/react-start";
 import { getRequest } from "@tanstack/react-start/server";
+import { Effect } from "effect";
 import * as Schema from "effect/Schema";
 import { Button } from "@/components/ui/button";
 import {
@@ -26,6 +26,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { Auth } from "@/lib/Auth";
 import * as Domain from "@/lib/Domain";
 
 const organizationIdSchema = Schema.Struct({ organizationId: Schema.String });
@@ -48,41 +49,45 @@ export const Route = createFileRoute("/app/$organizationId/members")({
 
 const getLoaderData = createServerFn({ method: "GET" })
   .inputValidator(Schema.toStandardSchemaV1(organizationIdSchema))
-  .handler(async ({ data: { organizationId }, context: { authService } }) => {
-    const request = getRequest();
-    const session = await authService.api.getSession({
-      headers: request.headers,
-    });
-    invariant(session, "Missing session");
-
-    const { success: canEdit } = await authService.api.hasPermission({
-      headers: request.headers,
-      body: {
-        organizationId,
-        permissions: { member: ["update", "delete"] },
-      },
-    });
-
-    const { members } = await authService.api.listMembers({
-      headers: request.headers,
-      query: { organizationId },
-    });
-
-    const currentMember = members.find(
-      (m) => m.user.email === session.user.email,
-    );
-    invariant(currentMember, "Missing member");
-
-    const canLeaveMemberId =
-      currentMember.role !== "owner" ? currentMember.id : undefined;
-
-    return {
-      canEdit,
-      canLeaveMemberId,
-      userEmail: session.user.email,
-      members,
-    };
-  });
+  .handler(({ data: { organizationId }, context: { runEffect } }) =>
+    runEffect(
+      Effect.gen(function* () {
+        const request = getRequest();
+        const auth = yield* Auth;
+        const session = yield* Effect.fromNullishOr(
+          yield* Effect.tryPromise(() =>
+            auth.api.getSession({ headers: request.headers }),
+          ),
+        );
+        const { success: canEdit } = yield* Effect.tryPromise(() =>
+          auth.api.hasPermission({
+            headers: request.headers,
+            body: {
+              organizationId,
+              permissions: { member: ["update", "delete"] },
+            },
+          }),
+        );
+        const { members } = yield* Effect.tryPromise(() =>
+          auth.api.listMembers({
+            headers: request.headers,
+            query: { organizationId },
+          }),
+        );
+        const currentMember = yield* Effect.fromNullishOr(
+          members.find((m) => m.user.email === session.user.email),
+        );
+        const canLeaveMemberId =
+          currentMember.role !== "owner" ? currentMember.id : undefined;
+        return {
+          canEdit,
+          canLeaveMemberId,
+          userEmail: session.user.email,
+          members,
+        };
+      }),
+    ),
+  );
 
 /**
  * Authorization is enforced by better-auth removeMember.
