@@ -1,8 +1,6 @@
 import type { OrganizationAgent } from "@/organization-agent";
-import {
-  organizationMessageSchema,
-  type OrganizationMessage,
-} from "@/organization-messages";
+import type { OrganizationMessage } from "@/organization-messages";
+import * as React from "react";
 import { invariant } from "@epic-web/invariant";
 import { useForm } from "@tanstack/react-form";
 import { useMutation } from "@tanstack/react-query";
@@ -13,6 +11,7 @@ import {
 } from "@tanstack/react-router";
 import { createServerFn, useServerFn } from "@tanstack/react-start";
 import { useAgent } from "agents/react";
+import { Cause, Effect } from "effect";
 import * as Exit from "effect/Exit";
 import * as Schema from "effect/Schema";
 import {
@@ -23,7 +22,6 @@ import {
   MessageSquare,
   XCircle,
 } from "lucide-react";
-import * as React from "react";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import {
@@ -40,23 +38,29 @@ import {
   FieldLabel,
 } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
+import { CloudflareEnv } from "@/lib/effect-services";
+import { organizationMessageSchema } from "@/organization-messages";
 
 const organizationIdSchema = Schema.Struct({
   organizationId: Schema.NonEmptyString,
 });
 
-const uploadNameSchema = Schema.Trim
-  .check(Schema.isMinLength(1))
-  .check(Schema.isPattern(/^[A-Za-z0-9_-]+$/));
+const uploadNameSchema = Schema.Trim.check(Schema.isMinLength(1)).check(
+  Schema.isPattern(/^[A-Za-z0-9_-]+$/),
+);
 
-const imageMimeTypes = ["image/png", "image/jpeg", "image/webp", "image/gif"] as const;
+const imageMimeTypes = [
+  "image/png",
+  "image/jpeg",
+  "image/webp",
+  "image/gif",
+] as const;
 
-const uploadImageFileSchema = Schema.File
-  .check(Schema.isMinSize(1))
+const uploadImageFileSchema = Schema.File.check(Schema.isMinSize(1))
   .check(Schema.isMaxSize(5_000_000))
   .check(
     Schema.makeFilter((file) =>
-      imageMimeTypes.includes(file.type as (typeof imageMimeTypes)[number])
+      imageMimeTypes.includes(file.type as (typeof imageMimeTypes)[number]),
     ),
   );
 
@@ -94,7 +98,12 @@ const uploadFile = createServerFn({ method: "POST" })
         idempotencyKey,
       });
     }
-    return { success: true, name: data.name, size: data.file.size, idempotencyKey };
+    return {
+      success: true,
+      name: data.name,
+      size: data.file.size,
+      idempotencyKey,
+    };
   });
 
 const deleteUpload = createServerFn({ method: "POST" })
@@ -119,47 +128,54 @@ const deleteUpload = createServerFn({ method: "POST" })
 
 const getUploads = createServerFn({ method: "GET" })
   .inputValidator(Schema.toStandardSchemaV1(organizationIdSchema))
-  .handler(async ({ context: { session, env }, data: { organizationId } }) => {
-    invariant(session, "Missing session");
-    invariant(
-      session.session.activeOrganizationId === organizationId,
-      "Organization mismatch",
-    );
-    const id = env.ORGANIZATION_AGENT.idFromName(organizationId);
-    const stub = env.ORGANIZATION_AGENT.get(id);
-    const uploads = await stub.getUploads();
-    if (env.ENVIRONMENT === "local") {
-      return uploads.map((upload) => ({
-        ...upload,
-        thumbnailUrl: `/api/org/${organizationId}/upload-image/${encodeURIComponent(upload.name)}`,
-      }));
-    }
-    invariant(env.R2_BUCKET_NAME, "Missing R2_BUCKET_NAME");
-    invariant(env.R2_S3_ACCESS_KEY_ID, "Missing R2_S3_ACCESS_KEY_ID");
-    invariant(env.R2_S3_SECRET_ACCESS_KEY, "Missing R2_S3_SECRET_ACCESS_KEY");
-    const { AwsClient } = await import("aws4fetch");
-    const client = new AwsClient({
-      service: "s3",
-      region: "auto",
-      accessKeyId: env.R2_S3_ACCESS_KEY_ID,
-      secretAccessKey: env.R2_S3_SECRET_ACCESS_KEY,
-    });
-    return Promise.all(
-      uploads.map(async (upload) => {
-        const signed = await client.sign(
-          new Request(
-            `https://${env.CF_ACCOUNT_ID}.r2.cloudflarestorage.com/${env.R2_BUCKET_NAME}/${organizationId}/${upload.name}?X-Amz-Expires=900`,
-            { method: "GET" },
-          ),
-          { aws: { signQuery: true } },
-        );
-        return {
-          ...upload,
-          thumbnailUrl: signed.url,
-        };
-      }),
-    );
-  });
+  .handler(
+    async ({ context: { runEffect, session }, data: { organizationId } }) => {
+      return runEffect(
+        Effect.gen(function* () {
+          yield* Effect.fromNullishOr(session).pipe(
+            Effect.filterOrFail(
+              (s) => s.session.activeOrganizationId === organizationId,
+              () => new Cause.NoSuchElementError(),
+            ),
+          );
+          const env = yield* CloudflareEnv;
+          const id = env.ORGANIZATION_AGENT.idFromName(organizationId);
+          const stub = env.ORGANIZATION_AGENT.get(id);
+          const uploads = yield* Effect.tryPromise(() => stub.getUploads());
+          if (env.ENVIRONMENT === "local") {
+            return uploads.map((upload) => ({
+              ...upload,
+              thumbnailUrl: `/api/org/${organizationId}/upload-image/${encodeURIComponent(upload.name)}`,
+            }));
+          }
+          return yield* Effect.tryPromise(async () => {
+            const { AwsClient } = await import("aws4fetch");
+            const client = new AwsClient({
+              service: "s3",
+              region: "auto",
+              accessKeyId: env.R2_S3_ACCESS_KEY_ID,
+              secretAccessKey: env.R2_S3_SECRET_ACCESS_KEY,
+            });
+            return Promise.all(
+              uploads.map(async (upload) => {
+                const signed = await client.sign(
+                  new Request(
+                    `https://${env.CF_ACCOUNT_ID}.r2.cloudflarestorage.com/${env.R2_BUCKET_NAME}/${organizationId}/${upload.name}?X-Amz-Expires=900`,
+                    { method: "GET" },
+                  ),
+                  { aws: { signQuery: true } },
+                );
+                return {
+                  ...upload,
+                  thumbnailUrl: signed.url,
+                };
+              }),
+            );
+          });
+        }),
+      );
+    },
+  );
 
 export const Route = createFileRoute("/app/$organizationId/upload")({
   loader: ({ params: data }) => getUploads({ data }),
@@ -179,9 +195,7 @@ function RouteComponent() {
     onMessage: (event) => {
       const result = Schema.decodeUnknownExit(
         Schema.fromJsonString(organizationMessageSchema),
-      )(
-        String(event.data),
-      );
+      )(String(event.data));
       if (Exit.isFailure(result)) return;
       if (result.value.type !== "upload_deleted") {
         setMessages((prev) => [result.value, ...prev]);
@@ -205,7 +219,8 @@ function RouteComponent() {
   });
   const deleteUploadServerFn = useServerFn(deleteUpload);
   const deleteMutation = useMutation({
-    mutationFn: ({ name }: { name: string }) => deleteUploadServerFn({ data: { name } }),
+    mutationFn: ({ name }: { name: string }) =>
+      deleteUploadServerFn({ data: { name } }),
     onSuccess: () => {
       void router.invalidate();
     },
@@ -367,8 +382,12 @@ function RouteComponent() {
                     />
                   </div>
                   <div className="min-w-0">
-                    <p className="truncate text-sm font-medium">{upload.name}</p>
-                    <p className="text-muted-foreground text-xs">{new Date(upload.createdAt).toLocaleString()}</p>
+                    <p className="truncate text-sm font-medium">
+                      {upload.name}
+                    </p>
+                    <p className="text-muted-foreground text-xs">
+                      {new Date(upload.createdAt).toLocaleString()}
+                    </p>
                     <p className="text-muted-foreground truncate text-xs">
                       {upload.classificationLabel
                         ? `${upload.classificationLabel} (${String(Math.round((upload.classificationScore ?? 0) * 100))}%)`
@@ -430,19 +449,19 @@ function MessageIcon({ type }: { type: OrganizationMessage["type"] }) {
     case "upload_error":
       return <XCircle className="text-destructive size-4" />;
     case "upload_deleted":
-      return <Info className="text-blue-600 size-4" />;
+      return <Info className="size-4 text-blue-600" />;
     case "workflow_progress":
-      return <CircleDot className="text-yellow-600 size-4" />;
+      return <CircleDot className="size-4 text-yellow-600" />;
     case "workflow_complete":
-      return <Check className="text-green-600 size-4" />;
+      return <Check className="size-4 text-green-600" />;
     case "workflow_error":
       return <XCircle className="text-destructive size-4" />;
     case "approval_requested":
-      return <Info className="text-blue-600 size-4" />;
+      return <Info className="size-4 text-blue-600" />;
     case "classification_workflow_started":
-      return <CircleDot className="text-yellow-600 size-4" />;
+      return <CircleDot className="size-4 text-yellow-600" />;
     case "classification_updated":
-      return <Check className="text-green-600 size-4" />;
+      return <Check className="size-4 text-green-600" />;
     case "classification_error":
       return <XCircle className="text-destructive size-4" />;
   }

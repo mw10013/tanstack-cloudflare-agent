@@ -9,11 +9,13 @@ import {
 } from "@tanstack/react-router";
 import { createServerFn, useServerFn } from "@tanstack/react-start";
 import { getRequest } from "@tanstack/react-start/server";
-import { AlertCircle } from "lucide-react";
+import { Effect } from "effect";
 import * as Schema from "effect/Schema";
+import { AlertCircle } from "lucide-react";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { Switch } from "@/components/ui/switch";
+import { Stripe } from "@/lib/Stripe";
 
 export const Route = createFileRoute("/_mkt/pricing")({
   loader: async () => {
@@ -23,9 +25,14 @@ export const Route = createFileRoute("/_mkt/pricing")({
 });
 
 const getLoaderData = createServerFn({ method: "GET" }).handler(
-  async ({ context: { stripeService } }) => {
-    const plans = await stripeService.getPlans();
-    return { plans };
+  async ({ context: { runEffect } }) => {
+    return runEffect(
+      Effect.gen(function* () {
+        const stripe = yield* Stripe;
+        const plans = yield* stripe.getPlans();
+        return { plans };
+      }),
+    );
   },
 );
 

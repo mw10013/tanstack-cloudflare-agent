@@ -8,6 +8,7 @@ import {
 } from "@tanstack/react-router";
 import { createServerFn } from "@tanstack/react-start";
 import { useAgent } from "agents/react";
+import { Effect } from "effect";
 import * as Exit from "effect/Exit";
 import * as Schema from "effect/Schema";
 import { AlertCircle, Check, Play, X } from "lucide-react";
@@ -29,14 +30,22 @@ import {
 } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
 import { Spinner } from "@/components/ui/spinner";
+import { CloudflareEnv } from "@/lib/effect-services";
 import { organizationMessageSchema } from "@/organization-messages";
 
 const getLoaderData = createServerFn({ method: "GET" })
   .inputValidator((organizationId: string) => organizationId)
-  .handler(async ({ context: { env }, data: organizationId }) => {
-    const id = env.ORGANIZATION_AGENT.idFromName(organizationId);
-    const stub = env.ORGANIZATION_AGENT.get(id);
-    return { requests: await stub.listApprovalRequests() };
+  .handler(async ({ context: { runEffect }, data: organizationId }) => {
+    return runEffect(
+      Effect.gen(function* () {
+        const env = yield* CloudflareEnv;
+        const id = env.ORGANIZATION_AGENT.idFromName(organizationId);
+        const stub = env.ORGANIZATION_AGENT.get(id);
+        return {
+          requests: yield* Effect.tryPromise(() => stub.listApprovalRequests()),
+        };
+      }),
+    );
   });
 
 const requestApprovalSchema = Schema.Struct({
@@ -93,10 +102,7 @@ function RouteComponent() {
   });
 
   const requestMutation = useMutation({
-    mutationFn: ({
-      title,
-      description,
-    }: typeof requestApprovalSchema.Type) =>
+    mutationFn: ({ title, description }: typeof requestApprovalSchema.Type) =>
       agent.stub.requestApproval(title, description),
     onSuccess: () => {
       form.reset();

@@ -1,20 +1,47 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { createServerFn } from "@tanstack/react-start";
+import { Effect } from "effect";
+import { CloudflareEnv } from "@/lib/effect-services";
 
 const inspectorServerFn = createServerFn({ method: "GET" })
   .inputValidator((organizationId: string) => organizationId)
-  .handler(async ({ context: { env }, data: organizationId }) => {
-    const id = env.ORGANIZATION_AGENT.idFromName(organizationId);
-    const stub = env.ORGANIZATION_AGENT.get(id);
-    return {
-      agentState: await stub.getAgentState(),
-      agentQueues: await stub.getAgentQueues(),
-      agentSchedules: await stub.getAgentSchedules(),
-      agentWorkflows: await stub.getAgentWorkflows(),
-      chatMessages: await stub.getChatMessages(),
-      chatStreamChunks: await stub.getChatStreamChunks(),
-      chatStreamMetadata: await stub.getChatStreamMetadata(),
-    };
+  .handler(async ({ context: { runEffect }, data: organizationId }) => {
+    return runEffect(
+      Effect.gen(function* () {
+        const env = yield* CloudflareEnv;
+        const id = env.ORGANIZATION_AGENT.idFromName(organizationId);
+        const stub = env.ORGANIZATION_AGENT.get(id);
+        return yield* Effect.tryPromise(() =>
+          Promise.all([
+            stub.getAgentState(),
+            stub.getAgentQueues(),
+            stub.getAgentSchedules(),
+            stub.getAgentWorkflows(),
+            stub.getChatMessages(),
+            stub.getChatStreamChunks(),
+            stub.getChatStreamMetadata(),
+          ]).then(
+            ([
+              agentState,
+              agentQueues,
+              agentSchedules,
+              agentWorkflows,
+              chatMessages,
+              chatStreamChunks,
+              chatStreamMetadata,
+            ]) => ({
+              agentState,
+              agentQueues,
+              agentSchedules,
+              agentWorkflows,
+              chatMessages,
+              chatStreamChunks,
+              chatStreamMetadata,
+            }),
+          ),
+        );
+      }),
+    );
   });
 
 export const Route = createFileRoute("/app/$organizationId/inspector")({
