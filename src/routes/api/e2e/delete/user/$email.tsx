@@ -1,41 +1,52 @@
 import { createFileRoute } from "@tanstack/react-router";
+import { Effect } from "effect";
+import * as Option from "effect/Option";
+import { D1 } from "@/lib/D1";
+import { Repository } from "@/lib/Repository";
+import { Stripe } from "@/lib/Stripe";
 
 export const Route = createFileRoute("/api/e2e/delete/user/$email")({
   server: {
     handlers: {
-      POST: async ({
-        params: { email },
-        context: { repository, stripeService, env },
-      }) => {
-        // Always delete Stripe customers by email since D1 database may be out of sync
-        const customers = await stripeService.stripe.customers.list({
-          email,
-        });
-        for (const customer of customers.data) {
-          await stripeService.stripe.customers.del(customer.id);
-        }
+      POST: async ({ params: { email }, context: { runEffect } }) =>
+        runEffect(
+          Effect.gen(function* () {
+            const stripe = yield* Stripe;
+            const repository = yield* Repository;
+            const d1 = yield* D1;
 
-        const user = await repository.getUser({ email });
-        if (!user) {
-          return Response.json({
-            success: true,
-            message: `User ${email} already deleted.`,
-          });
-        }
-        if (user.role === "admin") {
-          return Response.json(
-            {
-              success: false,
-              message: `Cannot delete admin user ${email}.`,
-            },
-            { status: 403 },
-          );
-        }
+            // Always delete Stripe customers by email since D1 database may be out of sync
+            const customers = yield* Effect.tryPromise(() =>
+              stripe.stripe.customers.list({ email }),
+            );
+            for (const customer of customers.data) {
+              yield* Effect.tryPromise(() =>
+                stripe.stripe.customers.del(customer.id),
+              );
+            }
 
-        const [deleteOrganizationResult, deleteUserResult] = await env.D1.batch(
-          [
-            env.D1.prepare(
-              `
+            const userOption = yield* repository.getUser(email);
+            if (Option.isNone(userOption)) {
+              return Response.json({
+                success: true,
+                message: `User ${email} already deleted.`,
+              });
+            }
+            const user = userOption.value;
+            if (user.role === "admin") {
+              return Response.json(
+                {
+                  success: false,
+                  message: `Cannot delete admin user ${email}.`,
+                },
+                { status: 403 },
+              );
+            }
+
+            const [deleteOrganizationResult, deleteUserResult] = yield* d1.batch(
+              [
+                d1.prepare(
+                  `
 delete from Organization where id in (
   select o.id
   from Organization o
@@ -51,20 +62,21 @@ delete from Organization where id in (
     )
 )
           `,
-            ).bind(user.id),
-            env.D1.prepare("delete from User where id = ? returning *").bind(
-              user.id,
-            ),
-          ],
-        );
+                ).bind(user.id),
+                d1.prepare("delete from User where id = ? returning *").bind(
+                  user.id,
+                ),
+              ],
+            );
 
-        const message = `Deleted user ${email}, deletedOrganizationCount: ${String(deleteOrganizationResult.results.length)} deletedUserCount: ${String(deleteUserResult.results.length)})`;
-        console.log(message);
-        return Response.json({
-          success: true,
-          message,
-        });
-      },
+            const message = `Deleted user ${email}, deletedOrganizationCount: ${String(deleteOrganizationResult.results.length)} deletedUserCount: ${String(deleteUserResult.results.length)})`;
+            console.log(message);
+            return Response.json({
+              success: true,
+              message,
+            });
+          }),
+        ),
     },
   },
 });

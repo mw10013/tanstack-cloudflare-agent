@@ -7,6 +7,7 @@ import { Effect } from "effect";
 import * as Schema from "effect/Schema";
 import { AlertCircle } from "lucide-react";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
+import { Auth } from "@/lib/Auth";
 import { Button } from "@/components/ui/button";
 import {
   Card,
@@ -48,32 +49,45 @@ export const login = createServerFn({
   method: "POST",
 })
   .inputValidator(Schema.toStandardSchemaV1(loginSchema))
-  .handler(async ({ data, context: { authService, env } }) => {
-    const request = getRequest();
-    const normalizedEmail = data.email.trim().toLowerCase();
-    if (env.ENVIRONMENT !== "local") {
-      const whitelist = env.EMAIL_WHITELIST.split(",")
-        .map((email) => email.trim().toLowerCase())
-        .filter(Boolean);
-      if (whitelist.length > 0 && !whitelist.includes(normalizedEmail)) {
-        throw new Error("Email not allowed. Please contact support.");
-      }
-    }
-    const result = await authService.api.signInMagicLink({
-      headers: request.headers,
-      body: { email: data.email, callbackURL: "/magic-link" },
-    });
-    if (!result.status) {
-      throw new Error("Failed to send magic link. Please try again.");
-    }
-    const magicLink =
-      // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition
-      env.DEMO_MODE === "true"
-        ? ((await env.KV.get(`demo:magicLink`)) ?? undefined)
-        : undefined;
-    console.log("magicLink", magicLink);
-    return { success: true, magicLink };
-  });
+  .handler(({ data, context: { runEffect } }) =>
+    runEffect(
+      Effect.gen(function* () {
+        const request = getRequest();
+        const auth = yield* Auth;
+        const env = yield* CloudflareEnv;
+        const normalizedEmail = data.email.trim().toLowerCase();
+        if (env.ENVIRONMENT !== "local") {
+          const whitelist = env.EMAIL_WHITELIST.split(",")
+            .map((email: string) => email.trim().toLowerCase())
+            .filter(Boolean);
+          if (whitelist.length > 0 && !whitelist.includes(normalizedEmail)) {
+            return yield* Effect.fail(
+              new Error("Email not allowed. Please contact support."),
+            );
+          }
+        }
+        const result = yield* Effect.tryPromise(() =>
+          auth.api.signInMagicLink({
+            headers: request.headers,
+            body: { email: data.email, callbackURL: "/magic-link" },
+          }),
+        );
+        if (!result.status) {
+          return yield* Effect.fail(
+            new Error("Failed to send magic link. Please try again."),
+          );
+        }
+        const magicLink =
+          // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition
+          env.DEMO_MODE === "true"
+            ? ((yield* Effect.tryPromise(() => env.KV.get(`demo:magicLink`))) ??
+              undefined)
+            : undefined;
+        console.log("magicLink", magicLink);
+        return { success: true as const, magicLink };
+      }),
+    ),
+  );
 
 function RouteComponent() {
   const { isDemoMode } = Route.useLoaderData();

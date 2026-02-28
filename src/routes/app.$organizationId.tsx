@@ -35,7 +35,7 @@ import {
   SidebarTrigger,
 } from "@/components/ui/sidebar";
 import { Auth } from "@/lib/Auth";
-import { signOutServerFn } from "@/lib/auth-service";
+import { signOutServerFn } from "@/lib/Auth";
 
 const beforeLoadServerFn = createServerFn({ method: "GET" })
   .inputValidator((organizationId: string) => organizationId)

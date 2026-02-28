@@ -1,16 +1,14 @@
 import type { AuthService } from "@/lib/auth-service";
 import type { RunEffect } from "@/lib/effect-services";
-import type { Repository } from "@/lib/repository-service";
-import type { StripeService } from "@/lib/stripe-service";
 import serverEntry from "@tanstack/react-start/server-entry";
 import { getAgentByName, routeAgentRequest } from "agents";
+import { Effect } from "effect";
 import * as Exit from "effect/Exit";
 import * as Schema from "effect/Schema";
-import { createAuthService } from "@/lib/auth-service";
+import { Auth } from "@/lib/Auth";
 import { createD1SessionService } from "@/lib/d1-session-service";
 import { makeRunEffect } from "@/lib/effect-services";
-import { createRepository } from "@/lib/repository-service";
-import { createStripeService } from "@/lib/stripe-service";
+import { Repository } from "@/lib/Repository";
 import { extractAgentName } from "./organization-agent";
 
 export {
@@ -29,13 +27,8 @@ const r2QueueMessageSchema = Schema.Struct({
 
 export interface ServerContext {
   env: Env;
-  repository: Repository;
-  authService: AuthService;
-  stripeService: StripeService;
   runEffect: RunEffect;
   session?: AuthService["$Infer"]["Session"];
-  organization?: AuthService["$Infer"]["Organization"];
-  organizations?: AuthService["$Infer"]["Organization"][];
 }
 
 declare module "@tanstack/react-start" {
@@ -65,26 +58,16 @@ export default {
         ? "first-primary"
         : undefined,
     });
-    const repository = createRepository({ db: d1SessionService.getSession() });
-    const stripeService = createStripeService();
-    const authService = createAuthService({
-      db: d1SessionService.getSession(),
-      stripeService,
-      kv: env.KV,
-      baseURL: env.BETTER_AUTH_URL,
-      secret: env.BETTER_AUTH_SECRET,
-      // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition
-      demoMode: env.DEMO_MODE === "true",
-      transactionalEmail: env.TRANSACTIONAL_EMAIL,
-      stripeWebhookSecret: env.STRIPE_WEBHOOK_SECRET,
-    });
     const runEffect = makeRunEffect(env);
 
     const routed = await routeAgentRequest(request, env, {
       onBeforeConnect: async (req) => {
-        const session = await authService.api.getSession({
-          headers: req.headers,
-        });
+        const session = await runEffect(
+          Effect.gen(function* () {
+            const auth = yield* Auth;
+            return yield* auth.getSession(req.headers);
+          }),
+        );
         if (!session) {
           return new Response("Unauthorized", { status: 401 });
         }
@@ -96,9 +79,12 @@ export default {
         return undefined;
       },
       onBeforeRequest: async (req) => {
-        const session = await authService.api.getSession({
-          headers: req.headers,
-        });
+        const session = await runEffect(
+          Effect.gen(function* () {
+            const auth = yield* Auth;
+            return yield* auth.getSession(req.headers);
+          }),
+        );
         if (!session) {
           return new Response("Unauthorized", { status: 401 });
         }
@@ -113,15 +99,15 @@ export default {
     if (routed) {
       return routed;
     }
-    const session = await authService.api.getSession({
-      headers: request.headers,
-    });
+    const session = await runEffect(
+      Effect.gen(function* () {
+        const auth = yield* Auth;
+        return yield* auth.getSession(request.headers);
+      }),
+    );
     const response = await serverEntry.fetch(request, {
       context: {
         env,
-        repository,
-        authService,
-        stripeService,
         runEffect,
         session: session ?? undefined,
       },
@@ -133,8 +119,13 @@ export default {
   async scheduled(scheduledEvent, env, _ctx) {
     switch (scheduledEvent.cron) {
       case "0 0 * * *": {
-        const repository = createRepository({ db: env.D1 });
-        const deletedCount = await repository.deleteExpiredSessions();
+        const runEffect = makeRunEffect(env);
+        const deletedCount = await runEffect(
+          Effect.gen(function* () {
+            const repository = yield* Repository;
+            return yield* repository.deleteExpiredSessions();
+          }),
+        );
         console.log(`Deleted ${String(deletedCount)} expired sessions`);
         break;
       }

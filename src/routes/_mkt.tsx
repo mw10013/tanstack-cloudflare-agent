@@ -5,7 +5,7 @@ import { AppLogo } from "@/components/app-logo";
 import { ThemeSwitcher } from "@/components/theme-switcher";
 import { Button } from "@/components/ui/button";
 import { Separator } from "@/components/ui/separator";
-import { signOutServerFn } from "@/lib/auth-service";
+import { signOutServerFn } from "@/lib/Auth";
 
 const beforeLoadServerFn = createServerFn().handler(
   ({ context: { session } }) => {

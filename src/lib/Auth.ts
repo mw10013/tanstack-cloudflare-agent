@@ -1,5 +1,8 @@
 import type { BetterAuthOptions } from "better-auth";
 import { stripe as stripePlugin } from "@better-auth/stripe";
+import { redirect } from "@tanstack/react-router";
+import { createServerFn } from "@tanstack/react-start";
+import { getRequest } from "@tanstack/react-start/server";
 import { betterAuth } from "better-auth";
 import { createAuthMiddleware } from "better-auth/api";
 import { admin, magicLink, organization } from "better-auth/plugins";
@@ -303,3 +306,17 @@ export class Auth extends ServiceMap.Service<Auth>()("Auth", {
 }) {
   static layer = Layer.effect(this, this.make);
 }
+
+export const signOutServerFn = createServerFn({ method: "POST" }).handler(
+  ({ context: { runEffect } }) =>
+    runEffect(
+      Effect.gen(function* () {
+        const request = getRequest();
+        const auth = yield* Auth;
+        yield* Effect.tryPromise(() =>
+          auth.api.signOut({ headers: request.headers }),
+        );
+        return yield* Effect.die(redirect({ to: "/" }));
+      }),
+    ),
+);

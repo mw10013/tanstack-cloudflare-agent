@@ -32,7 +32,7 @@ import {
   SidebarProvider,
   SidebarTrigger,
 } from "@/components/ui/sidebar";
-import { signOutServerFn } from "@/lib/auth-service";
+import { signOutServerFn } from "@/lib/Auth";
 
 const beforeLoadServerFn = createServerFn().handler(
   ({ context: { runEffect, session } }) =>
