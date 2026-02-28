@@ -6,7 +6,7 @@ import {
 } from "@tanstack/react-router";
 import { createServerFn, useServerFn } from "@tanstack/react-start";
 import { getRequest } from "@tanstack/react-start/server";
-import { Effect } from "effect";
+import { Cause, Effect } from "effect";
 import * as Schema from "effect/Schema";
 import { Button } from "@/components/ui/button";
 import {
@@ -40,7 +40,12 @@ const getLoaderData = createServerFn({ method: "GET" })
     async ({ data: { organizationId }, context: { runEffect, session } }) => {
       return runEffect(
         Effect.gen(function* () {
-          const validSession = yield* Effect.fromNullishOr(session);
+          const validSession = yield* Effect.fromNullishOr(session).pipe(
+            Effect.filterOrFail(
+              (s) => organizationId === s.session.activeOrganizationId,
+              () => new Cause.NoSuchElementError(),
+            ),
+          );
           const repository = yield* Repository;
           return yield* repository.getAppDashboardData({
             userEmail: validSession.user.email,
