@@ -7,7 +7,7 @@ import { betterAuth } from "better-auth";
 import { createAuthMiddleware } from "better-auth/api";
 import { admin, magicLink, organization } from "better-auth/plugins";
 import { tanstackStartCookies } from "better-auth/tanstack-start";
-import { Cause, Data, Effect, Layer, ServiceMap } from "effect";
+import { Cause, Config, Data, Effect, Layer, Redacted, ServiceMap } from "effect";
 import { d1Adapter } from "@/lib/d1-adapter";
 import { D1 } from "./D1";
 import { Stripe } from "./Stripe";
@@ -38,7 +38,11 @@ interface CreateBetterAuthOptions {
   db: D1Database | D1DatabaseSession;
   d1: D1["Service"];
   stripe: Stripe["Service"];
-  env: Env;
+  kv: KVNamespace;
+  betterAuthUrl: string;
+  betterAuthSecret: Redacted.Redacted;
+  transactionalEmail: string;
+  stripeWebhookSecret: Redacted.Redacted;
   databaseHookUserCreateAfter?: NonNullable<
     NonNullable<
       NonNullable<BetterAuthOptions["databaseHooks"]>["user"]
@@ -55,13 +59,17 @@ const createBetterAuthOptions = ({
   db,
   d1,
   stripe,
-  env,
+  kv,
+  betterAuthUrl,
+  betterAuthSecret,
+  transactionalEmail,
+  stripeWebhookSecret,
   databaseHookUserCreateAfter,
   databaseHookSessionCreateBefore,
 }: CreateBetterAuthOptions) =>
   ({
-    baseURL: env.BETTER_AUTH_URL,
-    secret: env.BETTER_AUTH_SECRET,
+    baseURL: betterAuthUrl,
+    secret: Redacted.value(betterAuthSecret),
     telemetry: { enabled: false },
     rateLimit: { enabled: false },
     database: d1Adapter(db),
@@ -116,12 +124,12 @@ const createBetterAuthOptions = ({
         storeToken: "hashed",
         sendMagicLink: async (data) => {
           console.log("sendMagicLink", data);
-          await env.KV.put("demo:magicLink", data.url, {
+          await kv.put("demo:magicLink", data.url, {
             expirationTtl: 60,
           });
           console.log(`Email would be sent to: ${data.email}`);
           console.log(`Subject: Your Magic Link`);
-          console.log(`From: ${env.TRANSACTIONAL_EMAIL}`);
+          console.log(`From: ${transactionalEmail}`);
           console.log(`Magic link URL: ${data.url}`);
         },
       }),
@@ -136,17 +144,17 @@ const createBetterAuthOptions = ({
           invitation: { modelName: "Invitation" },
         },
         sendInvitationEmail: (data) => {
-          const url = `${env.BETTER_AUTH_URL}/accept-invitation/${data.id}`;
+          const url = `${betterAuthUrl}/accept-invitation/${data.id}`;
           console.log(`Invitation email would be sent to: ${data.email}`);
           console.log(`Subject: You're invited!`);
-          console.log(`From: ${env.TRANSACTIONAL_EMAIL}`);
+          console.log(`From: ${transactionalEmail}`);
           console.log(`Invitation URL: ${url}`);
           return Promise.resolve();
         },
       }),
       stripePlugin({
         stripeClient: stripe.stripe,
-        stripeWebhookSecret: env.STRIPE_WEBHOOK_SECRET,
+        stripeWebhookSecret: Redacted.value(stripeWebhookSecret),
         createCustomerOnSignUp: false,
         subscription: {
           enabled: true,
@@ -255,7 +263,13 @@ export class Auth extends ServiceMap.Service<Auth>()("Auth", {
   make: Effect.gen(function* () {
     const d1 = yield* D1;
     const stripe = yield* Stripe;
-    const env = yield* CloudflareEnv;
+    const authConfig = yield* Config.all({
+      betterAuthUrl: Config.nonEmptyString("BETTER_AUTH_URL"),
+      betterAuthSecret: Config.redacted("BETTER_AUTH_SECRET"),
+      transactionalEmail: Config.nonEmptyString("TRANSACTIONAL_EMAIL"),
+      stripeWebhookSecret: Config.redacted("STRIPE_WEBHOOK_SECRET"),
+    });
+    const { KV } = yield* CloudflareEnv;
     const db = { prepare: d1.prepare } as D1Database;
 
     const auth = betterAuth(
@@ -263,7 +277,11 @@ export class Auth extends ServiceMap.Service<Auth>()("Auth", {
         db,
         d1,
         stripe,
-        env,
+        kv: KV,
+        betterAuthUrl: authConfig.betterAuthUrl,
+        betterAuthSecret: authConfig.betterAuthSecret,
+        transactionalEmail: authConfig.transactionalEmail,
+        stripeWebhookSecret: authConfig.stripeWebhookSecret,
         databaseHookUserCreateAfter: async (user) => {
           if (user.role === "user") {
             await auth.api.createOrganization({

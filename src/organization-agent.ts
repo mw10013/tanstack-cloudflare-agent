@@ -10,6 +10,7 @@ import { callable } from "agents";
 import { AgentWorkflow } from "agents/workflows";
 import { convertToModelMessages, generateText, streamText } from "ai";
 import { createOpenAI } from "ai-gateway-provider/providers/openai";
+import { Redacted } from "effect";
 import * as Schema from "effect/Schema";
 import { createWorkersAI } from "workers-ai-provider";
 import {
@@ -994,7 +995,7 @@ export class OrganizationAgent extends AIChatAgent<Env> {
   private async refreshGoogleAccessToken(refreshToken: string) {
     const token = await refreshGoogleToken({
       clientId: this.env.GOOGLE_OAUTH_CLIENT_ID,
-      clientSecret: this.env.GOOGLE_OAUTH_CLIENT_SECRET,
+      clientSecret: Redacted.make(this.env.GOOGLE_OAUTH_CLIENT_SECRET),
       redirectUri: this.env.GOOGLE_OAUTH_REDIRECT_URI,
       refreshToken,
     });

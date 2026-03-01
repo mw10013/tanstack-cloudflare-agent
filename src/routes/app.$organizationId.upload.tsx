@@ -10,7 +10,7 @@ import {
 } from "@tanstack/react-router";
 import { createServerFn, useServerFn } from "@tanstack/react-start";
 import { useAgent } from "agents/react";
-import { Cause, Effect } from "effect";
+import { Cause, Config, Effect, Redacted } from "effect";
 import * as Exit from "effect/Exit";
 import * as Schema from "effect/Schema";
 import {
@@ -84,21 +84,23 @@ const uploadFile = createServerFn({ method: "POST" })
         const organizationId = yield* Effect.fromNullishOr(
           validSession.session.activeOrganizationId,
         );
-        const env = yield* CloudflareEnv;
+        const environment = yield* Config.nonEmptyString("ENVIRONMENT");
+        const r2BucketName = yield* Config.nonEmptyString("R2_BUCKET_NAME");
+        const { R2, R2_UPLOAD_QUEUE } = yield* CloudflareEnv;
         const key = `${organizationId}/${data.name}`;
         const idempotencyKey = crypto.randomUUID();
         yield* Effect.tryPromise(() =>
-          env.R2.put(key, data.file, {
+          R2.put(key, data.file, {
             httpMetadata: { contentType: data.file.type },
             customMetadata: { organizationId, name: data.name, idempotencyKey },
           }),
         );
-        if (env.ENVIRONMENT === "local") {
+        if (environment === "local") {
           yield* Effect.tryPromise(() =>
-            env.R2_UPLOAD_QUEUE.send({
+            R2_UPLOAD_QUEUE.send({
               account: "local",
               action: "PutObject",
-              bucket: env.R2_BUCKET_NAME,
+              bucket: r2BucketName,
               object: { key, size: data.file.size, eTag: "local" },
               eventTime: new Date().toISOString(),
               idempotencyKey,
@@ -124,15 +126,17 @@ const deleteUpload = createServerFn({ method: "POST" })
         const organizationId = yield* Effect.fromNullishOr(
           validSession.session.activeOrganizationId,
         );
-        const env = yield* CloudflareEnv;
+        const environment = yield* Config.nonEmptyString("ENVIRONMENT");
+        const r2BucketName = yield* Config.nonEmptyString("R2_BUCKET_NAME");
+        const { R2, R2_UPLOAD_QUEUE } = yield* CloudflareEnv;
         const key = `${organizationId}/${data.name}`;
-        yield* Effect.tryPromise(() => env.R2.delete(key));
-        if (env.ENVIRONMENT === "local") {
+        yield* Effect.tryPromise(() => R2.delete(key));
+        if (environment === "local") {
           yield* Effect.tryPromise(() =>
-            env.R2_UPLOAD_QUEUE.send({
+            R2_UPLOAD_QUEUE.send({
               account: "local",
               action: "DeleteObject",
-              bucket: env.R2_BUCKET_NAME,
+              bucket: r2BucketName,
               object: { key },
               eventTime: new Date().toISOString(),
             }),
@@ -155,11 +159,16 @@ const getUploads = createServerFn({ method: "GET" })
               () => new Cause.NoSuchElementError(),
             ),
           );
-          const env = yield* CloudflareEnv;
-          const id = env.ORGANIZATION_AGENT.idFromName(organizationId);
-          const stub = env.ORGANIZATION_AGENT.get(id);
+          const environment = yield* Config.nonEmptyString("ENVIRONMENT");
+          const r2BucketName = yield* Config.nonEmptyString("R2_BUCKET_NAME");
+          const r2S3AccessKeyId = yield* Config.redacted("R2_S3_ACCESS_KEY_ID");
+          const r2S3SecretAccessKey = yield* Config.redacted("R2_S3_SECRET_ACCESS_KEY");
+          const cfAccountId = yield* Config.nonEmptyString("CF_ACCOUNT_ID");
+          const { ORGANIZATION_AGENT } = yield* CloudflareEnv;
+          const id = ORGANIZATION_AGENT.idFromName(organizationId);
+          const stub = ORGANIZATION_AGENT.get(id);
           const uploads = yield* Effect.tryPromise(() => stub.getUploads());
-          if (env.ENVIRONMENT === "local") {
+          if (environment === "local") {
             return uploads.map((upload) => ({
               ...upload,
               thumbnailUrl: `/api/org/${organizationId}/upload-image/${encodeURIComponent(upload.name)}`,
@@ -170,14 +179,14 @@ const getUploads = createServerFn({ method: "GET" })
             const client = new AwsClient({
               service: "s3",
               region: "auto",
-              accessKeyId: env.R2_S3_ACCESS_KEY_ID,
-              secretAccessKey: env.R2_S3_SECRET_ACCESS_KEY,
+              accessKeyId: Redacted.value(r2S3AccessKeyId),
+              secretAccessKey: Redacted.value(r2S3SecretAccessKey),
             });
             return Promise.all(
               uploads.map(async (upload) => {
                 const signed = await client.sign(
                   new Request(
-                    `https://${env.CF_ACCOUNT_ID}.r2.cloudflarestorage.com/${env.R2_BUCKET_NAME}/${organizationId}/${upload.name}?X-Amz-Expires=900`,
+                    `https://${cfAccountId}.r2.cloudflarestorage.com/${r2BucketName}/${organizationId}/${upload.name}?X-Amz-Expires=900`,
                     { method: "GET" },
                   ),
                   { aws: { signQuery: true } },

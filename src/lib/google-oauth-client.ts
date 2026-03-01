@@ -1,9 +1,10 @@
+import { Redacted } from "effect";
 import * as Oidc from "openid-client";
 import * as Schema from "effect/Schema";
 
 export interface GoogleOAuthClientInput {
   clientId: string;
-  clientSecret: string;
+  clientSecret: Redacted.Redacted;
   redirectUri: string;
 }
 
@@ -25,14 +26,15 @@ let cachedConfigKey: string | undefined;
 const getGoogleOidcConfig = async (
   { clientId, clientSecret }: GoogleOAuthClientInput,
 ) => {
-  const configKey = `${clientId}:${clientSecret}`;
+  const secret = Redacted.value(clientSecret);
+  const configKey = `${clientId}:${secret}`;
   if (cachedConfig && cachedConfigKey === configKey) {
     return cachedConfig;
   }
   const config = await Oidc.discovery(
     new URL("https://accounts.google.com"),
     clientId,
-    clientSecret,
+    secret,
   );
   cachedConfig = config;
   cachedConfigKey = configKey;

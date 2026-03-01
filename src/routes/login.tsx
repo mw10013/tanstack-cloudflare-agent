@@ -3,7 +3,7 @@ import { useMutation } from "@tanstack/react-query";
 import { createFileRoute, useHydrated } from "@tanstack/react-router";
 import { createServerFn, useServerFn } from "@tanstack/react-start";
 import { getRequest } from "@tanstack/react-start/server";
-import { Effect } from "effect";
+import { Config, Effect } from "effect";
 import * as Schema from "effect/Schema";
 import { AlertCircle } from "lucide-react";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
@@ -34,9 +34,8 @@ const getLoaderData = createServerFn({ method: "GET" }).handler(
   ({ context: { runEffect } }) =>
     runEffect(
       Effect.gen(function* () {
-        const env = yield* CloudflareEnv;
-        // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition
-        return { isDemoMode: env.DEMO_MODE === "true" };
+        const demoMode = yield* Config.boolean("DEMO_MODE");
+        return { isDemoMode: demoMode };
       }),
     ),
 );
@@ -54,10 +53,13 @@ export const login = createServerFn({
       Effect.gen(function* () {
         const request = getRequest();
         const auth = yield* Auth;
-        const env = yield* CloudflareEnv;
+        const environment = yield* Config.nonEmptyString("ENVIRONMENT");
+        const demoMode = yield* Config.boolean("DEMO_MODE");
+        const emailWhitelist = yield* Config.nonEmptyString("EMAIL_WHITELIST");
+        const { KV } = yield* CloudflareEnv;
         const normalizedEmail = data.email.trim().toLowerCase();
-        if (env.ENVIRONMENT !== "local") {
-          const whitelist = env.EMAIL_WHITELIST.split(",")
+        if (environment !== "local") {
+          const whitelist = emailWhitelist.split(",")
             .map((email: string) => email.trim().toLowerCase())
             .filter(Boolean);
           if (whitelist.length > 0 && !whitelist.includes(normalizedEmail)) {
@@ -78,9 +80,8 @@ export const login = createServerFn({
           );
         }
         const magicLink =
-          // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition
-          env.DEMO_MODE === "true"
-            ? ((yield* Effect.tryPromise(() => env.KV.get(`demo:magicLink`))) ??
+          demoMode
+            ? ((yield* Effect.tryPromise(() => KV.get(`demo:magicLink`))) ??
               undefined)
             : undefined;
         console.log("magicLink", magicLink);

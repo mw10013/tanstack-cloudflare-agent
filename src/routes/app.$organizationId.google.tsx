@@ -8,7 +8,7 @@ import {
 import { createServerFn, useServerFn } from "@tanstack/react-start";
 import { useAgent } from "agents/react";
 import * as React from "react";
-import { Effect } from "effect";
+import { Config, Effect } from "effect";
 import * as Schema from "effect/Schema";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
@@ -56,16 +56,12 @@ const beginGoogleConnect = createServerFn({ method: "POST" })
         const organizationId = yield* Effect.fromNullishOr(
           validSession.session.activeOrganizationId,
         );
-        const env = yield* CloudflareEnv;
-        const clientId = yield* Effect.fromNullishOr(env.GOOGLE_OAUTH_CLIENT_ID);
-        const clientSecret = yield* Effect.fromNullishOr(
-          env.GOOGLE_OAUTH_CLIENT_SECRET,
-        );
-        const redirectUri = yield* Effect.fromNullishOr(
-          env.GOOGLE_OAUTH_REDIRECT_URI,
-        );
-        const id = env.ORGANIZATION_AGENT.idFromName(organizationId);
-        const stub = env.ORGANIZATION_AGENT.get(id);
+        const clientId = yield* Config.nonEmptyString("GOOGLE_OAUTH_CLIENT_ID");
+        const clientSecret = yield* Config.redacted("GOOGLE_OAUTH_CLIENT_SECRET");
+        const redirectUri = yield* Config.nonEmptyString("GOOGLE_OAUTH_REDIRECT_URI");
+        const { ORGANIZATION_AGENT } = yield* CloudflareEnv;
+        const id = ORGANIZATION_AGENT.idFromName(organizationId);
+        const stub = ORGANIZATION_AGENT.get(id);
         const oauth = yield* Effect.tryPromise(() =>
           buildGoogleAuthorizationRequest({
             clientId,

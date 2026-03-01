@@ -382,9 +382,21 @@ No exhaustive switches. No pattern matching. Just a simple `"local"` guard.
 
 If a future value needs exhaustive matching, define `Schema.Literals` once in `Domain.ts` with a `satisfies` constraint against `Env`, and create a reusable `Config.schema(...)` constant.
 
-## Decisions
+## Redacted Handling Convention
 
-1. **Big-bang migration** — migrate all routes and services at once.
-2. **Auth.ts** — extract a config struct via `Config.all`, refactor `createBetterAuthOptions` to accept it.
-3. **Use `Config.redacted`** for all secrets (`BETTER_AUTH_SECRET`, `STRIPE_SECRET_KEY`, `STRIPE_WEBHOOK_SECRET`, `WORKERS_AI_API_TOKEN`, `GOOGLE_AI_STUDIO_API_KEY`, `GOOGLE_OAUTH_CLIENT_SECRET`). Unwrap with `Redacted.value()` at point of use.
-4. **Keep `CloudflareEnv`** service name, used only for bindings (D1, R2, KV, AI, Queue, RateLimit, DurableObjects, Workflows).
+Keep secrets as `Redacted<string>` as long as possible. Only unwrap with `Redacted.value()` at the consumption boundary.
+
+### Pattern
+
+```ts
+const clientSecret = yield* Config.redacted("GOOGLE_OAUTH_CLIENT_SECRET");
+// type: Redacted<string> — not assignable to string, compiler enforces it
+```
+
+No special naming convention — rely on the type. TypeScript catches misuse at compile time.
+
+### Unwrap Rules
+
+1. **Our own functions**: accept `Redacted` in the signature. Keep secrets opaque through our call chain.
+2. **Third-party SDKs** (e.g. `AwsClient`, `Stripe`, `betterAuth`): unwrap with `Redacted.value()` at the call site — the last possible moment.
+

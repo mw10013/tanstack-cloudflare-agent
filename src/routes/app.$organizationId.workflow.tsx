@@ -38,9 +38,9 @@ const getLoaderData = createServerFn({ method: "GET" })
   .handler(async ({ context: { runEffect }, data: organizationId }) => {
     return runEffect(
       Effect.gen(function* () {
-        const env = yield* CloudflareEnv;
-        const id = env.ORGANIZATION_AGENT.idFromName(organizationId);
-        const stub = env.ORGANIZATION_AGENT.get(id);
+        const { ORGANIZATION_AGENT } = yield* CloudflareEnv;
+        const id = ORGANIZATION_AGENT.idFromName(organizationId);
+        const stub = ORGANIZATION_AGENT.get(id);
         return {
           requests: yield* Effect.tryPromise(() => stub.listApprovalRequests()),
         };

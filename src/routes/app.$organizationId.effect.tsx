@@ -8,7 +8,7 @@ const getLoaderData = createServerFn({ method: "GET" }).handler(
     runEffect(
       Effect.gen(function* () {
         const greeting = yield* Greeting;
-        const environment = yield* Config.string("ENVIRONMENT");
+        const environment = yield* Config.nonEmptyString("ENVIRONMENT");
         return { greeting: greeting.greet(), environment };
       }),
     ),

@@ -1,5 +1,5 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { Effect } from "effect";
+import { Config, Effect } from "effect";
 import * as Option from "effect/Option";
 import { Auth } from "@/lib/Auth";
 import { CloudflareEnv } from "@/lib/effect-services";
@@ -12,7 +12,11 @@ export const Route = createFileRoute("/api/google/callback")({
         runEffect(
           Effect.gen(function* () {
             const auth = yield* Auth;
-            const env = yield* CloudflareEnv;
+            const betterAuthUrl = yield* Config.nonEmptyString("BETTER_AUTH_URL");
+            const googleClientId = yield* Config.nonEmptyString("GOOGLE_OAUTH_CLIENT_ID");
+            const googleClientSecret = yield* Config.redacted("GOOGLE_OAUTH_CLIENT_SECRET");
+            const googleRedirectUri = yield* Config.nonEmptyString("GOOGLE_OAUTH_REDIRECT_URI");
+            const { ORGANIZATION_AGENT } = yield* CloudflareEnv;
             const session = yield* Effect.tryPromise(() =>
               auth.api.getSession({ headers: request.headers }),
             );
@@ -26,24 +30,24 @@ export const Route = createFileRoute("/api/google/callback")({
             const providerError = callbackUrl.searchParams.get("error");
             if (providerError) {
               return Response.redirect(
-                `${env.BETTER_AUTH_URL}/app/${organizationId}/google?google=denied`,
+                `${betterAuthUrl}/app/${organizationId}/google?google=denied`,
                 302,
               );
             }
             if (!code || !state) {
               return Response.redirect(
-                `${env.BETTER_AUTH_URL}/app/${organizationId}/google?google=error`,
+                `${betterAuthUrl}/app/${organizationId}/google?google=error`,
                 302,
               );
             }
-            const id = env.ORGANIZATION_AGENT.idFromName(organizationId);
-            const stub = env.ORGANIZATION_AGENT.get(id);
+            const id = ORGANIZATION_AGENT.idFromName(organizationId);
+            const stub = ORGANIZATION_AGENT.get(id);
             const stateResult = yield* Effect.tryPromise(async () =>
               stub.consumeGoogleOAuthState(state),
             );
             if (!stateResult.ok) {
               return Response.redirect(
-                `${env.BETTER_AUTH_URL}/app/${organizationId}/google?google=error`,
+                `${betterAuthUrl}/app/${organizationId}/google?google=error`,
                 302,
               );
             }
@@ -51,9 +55,9 @@ export const Route = createFileRoute("/api/google/callback")({
             const tokenOption = yield* Effect.option(
               Effect.tryPromise(() =>
                 exchangeGoogleAuthorizationCode({
-                  clientId: env.GOOGLE_OAUTH_CLIENT_ID,
-                  clientSecret: env.GOOGLE_OAUTH_CLIENT_SECRET,
-                  redirectUri: env.GOOGLE_OAUTH_REDIRECT_URI,
+                  clientId: googleClientId,
+                  clientSecret: googleClientSecret,
+                  redirectUri: googleRedirectUri,
                   currentUrl: callbackUrl,
                   codeVerifier: stateResult.codeVerifier,
                   expectedState: state,
@@ -62,7 +66,7 @@ export const Route = createFileRoute("/api/google/callback")({
             );
             if (Option.isNone(tokenOption)) {
               return Response.redirect(
-                `${env.BETTER_AUTH_URL}/app/${organizationId}/google?google=error`,
+                `${betterAuthUrl}/app/${organizationId}/google?google=error`,
                 302,
               );
             }
@@ -77,7 +81,7 @@ export const Route = createFileRoute("/api/google/callback")({
               }),
             );
             return Response.redirect(
-              `${env.BETTER_AUTH_URL}/app/${organizationId}/google?google=connected`,
+              `${betterAuthUrl}/app/${organizationId}/google?google=connected`,
               302,
             );
           }),

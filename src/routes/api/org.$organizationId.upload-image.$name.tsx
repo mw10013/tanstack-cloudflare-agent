@@ -1,5 +1,5 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { Effect } from "effect";
+import { Config, Effect } from "effect";
 import { Auth } from "@/lib/Auth";
 import { CloudflareEnv } from "@/lib/effect-services";
 
@@ -9,8 +9,9 @@ export const Route = createFileRoute("/api/org/$organizationId/upload-image/$nam
       GET: async ({ request, params: { organizationId, name }, context: { runEffect } }) =>
         runEffect(
           Effect.gen(function* () {
-            const env = yield* CloudflareEnv;
-            if (env.ENVIRONMENT !== "local") {
+            const environment = yield* Config.nonEmptyString("ENVIRONMENT");
+            const { R2 } = yield* CloudflareEnv;
+            if (environment !== "local") {
               return new Response("Not Found", { status: 404 });
             }
             const auth = yield* Auth;
@@ -23,7 +24,7 @@ export const Route = createFileRoute("/api/org/$organizationId/upload-image/$nam
               return new Response("Forbidden", { status: 403 });
             }
             const key = `${organizationId}/${name}`;
-            const object = yield* Effect.tryPromise(() => env.R2.get(key));
+            const object = yield* Effect.tryPromise(() => R2.get(key));
             if (!object?.body) {
               return new Response("Not Found", { status: 404 });
             }
