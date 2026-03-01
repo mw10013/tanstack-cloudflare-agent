@@ -111,8 +111,8 @@ importers:
         specifier: 4.1.0
         version: 4.1.0
       effect:
-        specifier: 4.0.0-beta.18
-        version: 4.0.0-beta.18
+        specifier: 4.0.0-beta.21
+        version: 4.0.0-beta.21
       embla-carousel-react:
         specifier: 8.6.0
         version: 8.6.0(react@19.2.3)
@@ -3757,8 +3757,8 @@ packages:
   ee-first@1.1.1:
     resolution: {integrity: sha512-WMwm9LhRUo+WUaRN+vRuETqG89IgZphVSNkdFgeb6sS/E4OrDIN7t48CAewSHXc6C8lefD8KKfr5vY61brQlow==}
 
-  effect@4.0.0-beta.18:
-    resolution: {integrity: sha512-VkQ1p4ZMYqFsyVbj8AuSZJPsFIWF0YOLYX8d8SF/aV1bAlTtuedc2cHganATrRUgcZz3pPEc1ntINhMH3ULw0g==}
+  effect@4.0.0-beta.21:
+    resolution: {integrity: sha512-M2pujOGwVpu3q+10S7C99Ql19BreKgxKXNLZy8NpJ7ymT1vs7NzG9NWI6dFtcF5do0Dzas1Kpa8NwSH+sqy/Cw==}
 
   electron-to-chromium@1.5.267:
     resolution: {integrity: sha512-0Drusm6MVRXSOJpGbaSVgcQsuB4hEkMpHXaVstcPmhu5LIedxs1xNK/nIxmQIU/RPC0+1/o0AVZfBTkTNJOdUw==}
@@ -10523,7 +10523,7 @@ snapshots:
 
   ee-first@1.1.1: {}
 
-  effect@4.0.0-beta.18:
+  effect@4.0.0-beta.21:
     dependencies:
       '@standard-schema/spec': 1.1.0
       fast-check: 4.5.3
