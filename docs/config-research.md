@@ -311,19 +311,76 @@ const value = yield* Config.string("R2_S3_ACCESS_KEY_ID");
 
 - **When**: only for values where empty string is intentionally valid.
 
-#### Recommendation
+#### The ENVIRONMENT Problem: Keeping Literals in Sync
+
+`ENVIRONMENT` is typed as `"production" | "local"` in the auto-generated `worker-configuration.d.ts`. Using `Config.schema(Schema.Literals([...]))` means duplicating that union manually. Three approaches:
+
+**Option A: Derive from the generated type (recommended)**
+
+```ts
+// src/lib/Domain.ts — single source of truth in app code
+const Environment = Schema.Literals(["production", "local"] as const satisfies
+  readonly Env["ENVIRONMENT"][]);
+```
+
+The `satisfies` constraint ensures the array is a subset of `Env["ENVIRONMENT"]`. If wrangler adds `"staging"`, the generated `Env` type changes to `"production" | "local" | "staging"`, and while this won't break the existing Literals (it's still a valid subset), you'd need to manually add `"staging"` to get full coverage. But importantly — **it never silently accepts invalid values**.
+
+Usage at call sites:
+
+```ts
+// Config created once, reused everywhere
+export const EnvironmentConfig = Config.schema(Environment, "ENVIRONMENT");
+
+// In routes:
+const environment = yield* EnvironmentConfig;
+// type: "production" | "local"
+```
+
+**Option B: Just use `nonEmptyString`**
+
+```ts
+const environment = yield* Config.nonEmptyString("ENVIRONMENT");
+if (environment === "local") { ... }
+```
+
+- No sync burden at all.
+- Works fine for current usage — every call site only checks `=== "local"` or `!== "local"`, never an exhaustive switch.
+- Loses compile-time guarantee but gains zero maintenance cost.
+
+**Option C: Extract type directly from Env**
+
+```ts
+type Environment = Env["ENVIRONMENT"]; // "production" | "local"
+
+const EnvironmentConfig = Config.schema(
+  Schema.Literals(["production", "local"] as const satisfies readonly Environment[]),
+  "ENVIRONMENT"
+);
+```
+
+Same as Option A but makes the derivation from `Env` explicit.
+
+**Analysis of actual usage:**
+
+All 5 call sites use ENVIRONMENT the same way:
+- `login.tsx`: `if (env.ENVIRONMENT !== "local")`
+- `upload.tsx`: `if (env.ENVIRONMENT === "local")` (3×)
+- `upload-image.tsx`: `if (env.ENVIRONMENT !== "local")`
+
+No exhaustive switches. No pattern matching. Just a simple `"local"` guard.
+
+**Recommendation: Option B (`nonEmptyString`)** for ENVIRONMENT. The literal type provides no practical benefit here — all call sites are simple equality checks that work fine with `string`. Reserve `Schema.Literals` for cases where you actually exhaustive-match.
+
+#### Final Recommendation
 
 | Category | Constructor | Examples |
 |---|---|---|
-| Most env vars | `Config.nonEmptyString` | `BETTER_AUTH_URL`, `EMAIL_WHITELIST`, `CF_ACCOUNT_ID` |
+| Most env vars | `Config.nonEmptyString` | `BETTER_AUTH_URL`, `EMAIL_WHITELIST`, `CF_ACCOUNT_ID`, `ENVIRONMENT` |
 | Secrets | `Config.redacted` | `BETTER_AUTH_SECRET`, `STRIPE_SECRET_KEY`, `STRIPE_WEBHOOK_SECRET` |
 | Booleans | `Config.boolean` | `DEMO_MODE` |
-| Known enums | `Config.schema(Schema.Literals([...]))` | `ENVIRONMENT` |
 | Empty-valid | `Config.string` | `R2_S3_ACCESS_KEY_ID`, `R2_S3_SECRET_ACCESS_KEY` |
 
-The recommendation for `ENVIRONMENT` seems a little onerous and too manual. How do you keep the Literals up to date if they change? Would have to update them manually in multiple places? Or should this Schema.Literals be in Domain.ts? That may be better I guess, but then you also need to manually keep it in sync with what's in the cloudflare env, but I suppose there's no way around that.
-
-I need more research here with effective approaches that are functional and idiomatic to effect 4.
+If a future value needs exhaustive matching, define `Schema.Literals` once in `Domain.ts` with a `satisfies` constraint against `Env`, and create a reusable `Config.schema(...)` constant.
 
 ## Decisions
 
