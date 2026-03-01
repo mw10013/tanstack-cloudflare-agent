@@ -165,13 +165,16 @@ npm install -g @openai/codex
 ## Effect
 
 ```
+https://effecttalk.dev/
+https://www.effective.software/
+
 https://discord.com/channels/795981131316985866/1474166367530909958
 
 Effect.services + Effect.runPromiseWith
 Or use a FiberSet
 ```
 
-```*:Okay, imagine you have a toy box (your program), and you need helpers to do things for you — like a robot that fetches snacks or a teddy bear that tells you stories. In the old version (v3), there were four different ways to ask for a helper: Context.Tag, Context.GenericTag, Effect.Tag, and Effect.Service. That's confusing — like having four different doors into the same room.
+```Okay, imagine you have a toy box (your program), and you need helpers to do things for you — like a robot that fetches snacks or a teddy bear that tells you stories. In the old version (v3), there were four different ways to ask for a helper: Context.Tag, Context.GenericTag, Effect.Tag, and Effect.Service. That's confusing — like having four different doors into the same room.
 So in v4, they knocked down all four doors and built one nice door: ServiceMap.Service. Now there's only one way to make a helper, and everyone uses the same door.
 Here's what else changed, in kid terms:
 No more magic shortcuts. Effect.Tag used to let you call a helper's abilities directly, like saying "Robot, get snacks!" without first going to find the robot. But this magic trick had a problem — it would sometimes forget important details about what the robot could do (generic types got erased). So they removed the magic. Now you either find the robot first (yield*), or use .use() which is like saying "hey robot, do this one thing for me."
