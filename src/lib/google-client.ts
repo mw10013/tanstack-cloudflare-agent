@@ -1,13 +1,37 @@
-import * as Exit from "effect/Exit";
+import { Data, Effect } from "effect";
 import * as Schema from "effect/Schema";
+import * as HttpClient from "effect/unstable/http/HttpClient";
+import * as HttpBody from "effect/unstable/http/HttpBody";
+import type * as HttpClientError from "effect/unstable/http/HttpClientError";
+import * as HttpClientRequest from "effect/unstable/http/HttpClientRequest";
+import * as HttpClientResponse from "effect/unstable/http/HttpClientResponse";
 
-const GoogleApiError = Schema.Struct({
+export class GoogleApiError extends Data.TaggedError("GoogleApiError")<{
+  readonly code: number;
+  readonly message: string;
+  readonly status?: string;
+}> {}
+
+const GoogleApiErrorBody = Schema.Struct({
   error: Schema.Struct({
     code: Schema.Number,
     message: Schema.String,
     status: Schema.optionalKey(Schema.String),
   }),
 });
+
+const toGoogleApiError = (error: HttpClientError.HttpClientError): Effect.Effect<never, GoogleApiError> => {
+  const fallback = new GoogleApiError({
+    code: error.response?.status ?? 0,
+    message: error.message,
+  });
+  if (!error.response) return Effect.fail(fallback);
+  return error.response.json.pipe(
+    Effect.flatMap((json) => Schema.decodeUnknownEffect(GoogleApiErrorBody)(json)),
+    Effect.flatMap(({ error: e }) => Effect.fail(new GoogleApiError(e))),
+    Effect.mapError(() => fallback),
+  );
+};
 
 const DriveListResponse = Schema.Struct({
   files: Schema.optionalKey(
@@ -42,40 +66,18 @@ const SheetsAppendResponse = Schema.Struct({
   ),
 });
 
-interface GoogleRequestInput<
-  S extends Schema.Top & { readonly DecodingServices: never },
-> {
-  url: URL | string;
-  accessToken: string;
-  method?: "GET" | "POST";
-  body?: string;
-  schema: S;
-}
-
-const fetchGoogle = async <
-  S extends Schema.Top & { readonly DecodingServices: never },
->(
-  { url, accessToken, method = "GET", body, schema }: GoogleRequestInput<S>,
-): Promise<S["Type"]> => {
-  const response = await fetch(url, {
-    method,
-    headers: {
-      authorization: `Bearer ${accessToken}`,
-      ...(body ? { "content-type": "application/json" } : {}),
-    },
-    body,
-  });
-  if (!response.ok) {
-    const json = await response.json().catch(() => null);
-    const parsed = Schema.decodeUnknownExit(GoogleApiError)(json);
-    throw new Error(
-      Exit.isSuccess(parsed)
-        ? `Google API ${String(parsed.value.error.code)}: ${parsed.value.error.message}`
-        : `Google API request failed: ${String(response.status)}`,
-    );
-  }
-  return Schema.decodeUnknownSync(schema)(await response.json());
-};
+const fetchGoogle = <S extends Schema.Top & { readonly DecodingServices: never }>(
+  request: HttpClientRequest.HttpClientRequest,
+  schema: S,
+) =>
+  HttpClient.execute(request).pipe(
+    Effect.flatMap(HttpClientResponse.filterStatusOk),
+    Effect.flatMap(HttpClientResponse.schemaBodyJson(schema)),
+    Effect.catchTag("HttpClientError", toGoogleApiError),
+    Effect.catchTag("SchemaError", (error) =>
+      Effect.fail(new GoogleApiError({ code: 0, message: error.message })),
+    ),
+  );
 
 export const listDriveSpreadsheetsRequest = (
   accessToken: string,
@@ -88,7 +90,13 @@ export const listDriveSpreadsheetsRequest = (
   );
   url.searchParams.set("fields", "files(id,name,modifiedTime,webViewLink)");
   url.searchParams.set("pageSize", String(pageSize));
-  return fetchGoogle({ url, accessToken, schema: DriveListResponse });
+  return fetchGoogle(
+    HttpClientRequest.get(url, {
+      headers: { authorization: `Bearer ${accessToken}` },
+      acceptJson: true,
+    }),
+    DriveListResponse,
+  );
 };
 
 export const getSpreadsheetValuesRequest = (
@@ -96,11 +104,16 @@ export const getSpreadsheetValuesRequest = (
   spreadsheetId: string,
   range: string,
 ) =>
-  fetchGoogle({
-    url: `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/${encodeURIComponent(range)}`,
-    accessToken,
-    schema: SheetsValuesResponse,
-  });
+  fetchGoogle(
+    HttpClientRequest.get(
+      `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/${encodeURIComponent(range)}`,
+      {
+        headers: { authorization: `Bearer ${accessToken}` },
+        acceptJson: true,
+      },
+    ),
+    SheetsValuesResponse,
+  );
 
 export const appendSpreadsheetValuesRequest = (
   accessToken: string,
@@ -108,10 +121,14 @@ export const appendSpreadsheetValuesRequest = (
   range: string,
   values: string[],
 ) =>
-  fetchGoogle({
-    url: `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/${encodeURIComponent(range)}:append?valueInputOption=USER_ENTERED`,
-    accessToken,
-    method: "POST",
-    body: JSON.stringify({ values: [values] }),
-    schema: SheetsAppendResponse,
-  });
+  fetchGoogle(
+    HttpClientRequest.post(
+      `https://sheets.googleapis.com/v4/spreadsheets/${spreadsheetId}/values/${encodeURIComponent(range)}:append?valueInputOption=USER_ENTERED`,
+      {
+        headers: { authorization: `Bearer ${accessToken}` },
+        acceptJson: true,
+        body: HttpBody.jsonUnsafe({ values: [values] }),
+      },
+    ),
+    SheetsAppendResponse,
+  );

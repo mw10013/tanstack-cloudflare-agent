@@ -53,16 +53,14 @@ export const Route = createFileRoute("/api/google/callback")({
             }
 
             const tokenOption = yield* Effect.option(
-              Effect.tryPromise(() =>
-                exchangeGoogleAuthorizationCode({
-                  clientId: googleClientId,
-                  clientSecret: googleClientSecret,
-                  redirectUri: googleRedirectUri,
-                  currentUrl: callbackUrl,
-                  codeVerifier: stateResult.codeVerifier,
-                  expectedState: state,
-                }),
-              ),
+              exchangeGoogleAuthorizationCode({
+                clientId: googleClientId,
+                clientSecret: googleClientSecret,
+                redirectUri: googleRedirectUri,
+                currentUrl: callbackUrl,
+                codeVerifier: stateResult.codeVerifier,
+                expectedState: state,
+              }),
             );
             if (Option.isNone(tokenOption)) {
               return Response.redirect(

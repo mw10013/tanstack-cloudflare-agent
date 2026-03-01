@@ -62,18 +62,16 @@ const beginGoogleConnect = createServerFn({ method: "POST" })
         const { ORGANIZATION_AGENT } = yield* CloudflareEnv;
         const id = ORGANIZATION_AGENT.idFromName(organizationId);
         const stub = ORGANIZATION_AGENT.get(id);
-        const oauth = yield* Effect.tryPromise(() =>
-          buildGoogleAuthorizationRequest({
-            clientId,
-            clientSecret,
-            redirectUri,
-            scope: [
-              "https://www.googleapis.com/auth/drive.readonly",
-              "https://www.googleapis.com/auth/spreadsheets",
-              "https://www.googleapis.com/auth/documents",
-            ],
-          }),
-        );
+        const oauth = yield* buildGoogleAuthorizationRequest({
+          clientId,
+          clientSecret,
+          redirectUri,
+          scope: [
+            "https://www.googleapis.com/auth/drive.readonly",
+            "https://www.googleapis.com/auth/spreadsheets",
+            "https://www.googleapis.com/auth/documents",
+          ],
+        });
         yield* Effect.tryPromise(() =>
           stub.beginGoogleOAuth({
             state: oauth.state,

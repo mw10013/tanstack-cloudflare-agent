@@ -1,5 +1,6 @@
 import { isNotFound, isRedirect } from "@tanstack/react-router";
 import { Cause, ConfigProvider, Effect, Exit, Layer, ServiceMap } from "effect";
+import * as FetchHttpClient from "effect/unstable/http/FetchHttpClient";
 import { Auth } from "./Auth";
 import { D1 } from "./D1";
 import { Repository } from "./Repository";
@@ -20,19 +21,22 @@ const makeAppLayer = (env: Env) =>
         Repository.layer,
         Layer.provideMerge(
           D1.layer,
-          Layer.succeedServices(
-            ServiceMap.make(CloudflareEnv, env)
-              .pipe(
-                ServiceMap.add(Greeting, {
-                  greet: () => "Hello from Effect 4 ServiceMap!",
-                }),
-              )
-              .pipe(
-                ServiceMap.add(
-                  ConfigProvider.ConfigProvider,
-                  ConfigProvider.fromUnknown(env),
+          Layer.provideMerge(
+            FetchHttpClient.layer,
+            Layer.succeedServices(
+              ServiceMap.make(CloudflareEnv, env)
+                .pipe(
+                  ServiceMap.add(Greeting, {
+                    greet: () => "Hello from Effect 4 ServiceMap!",
+                  }),
+                )
+                .pipe(
+                  ServiceMap.add(
+                    ConfigProvider.ConfigProvider,
+                    ConfigProvider.fromUnknown(env),
+                  ),
                 ),
-              ),
+            ),
           ),
         ),
       ),

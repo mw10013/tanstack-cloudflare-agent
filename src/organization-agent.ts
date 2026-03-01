@@ -10,8 +10,9 @@ import { callable } from "agents";
 import { AgentWorkflow } from "agents/workflows";
 import { convertToModelMessages, generateText, streamText } from "ai";
 import { createOpenAI } from "ai-gateway-provider/providers/openai";
-import { Redacted } from "effect";
+import { Effect, Redacted } from "effect";
 import * as Schema from "effect/Schema";
+import * as FetchHttpClient from "effect/unstable/http/FetchHttpClient";
 import { createWorkersAI } from "workers-ai-provider";
 import {
   appendSpreadsheetValuesRequest,
@@ -642,7 +643,9 @@ export class OrganizationAgent extends AIChatAgent<Env> {
   @callable()
   async listDriveSpreadsheets() {
     const accessToken = await this.getValidGoogleAccessToken();
-    const data = await listDriveSpreadsheetsRequest(accessToken);
+    const data = await Effect.runPromise(
+      Effect.provide(listDriveSpreadsheetsRequest(accessToken), FetchHttpClient.layer),
+    );
     const now = Date.now();
     const files = (data.files ?? []).map((file) => ({
       spreadsheetId: file.id,
@@ -674,10 +677,11 @@ export class OrganizationAgent extends AIChatAgent<Env> {
     const sheetName = cfg.defaultSheetName ?? "Sheet1";
     const resolvedRange = range ?? `${sheetName}!A1:C20`;
     const accessToken = await this.getValidGoogleAccessToken();
-    return getSpreadsheetValuesRequest(
-      accessToken,
-      cfg.defaultSpreadsheetId,
-      resolvedRange,
+    return Effect.runPromise(
+      Effect.provide(
+        getSpreadsheetValuesRequest(accessToken, cfg.defaultSpreadsheetId, resolvedRange),
+        FetchHttpClient.layer,
+      ),
     );
   }
 
@@ -689,11 +693,11 @@ export class OrganizationAgent extends AIChatAgent<Env> {
     }
     const sheetName = cfg.defaultSheetName ?? "Sheet1";
     const accessToken = await this.getValidGoogleAccessToken();
-    return appendSpreadsheetValuesRequest(
-      accessToken,
-      cfg.defaultSpreadsheetId,
-      `${sheetName}!A:Z`,
-      values,
+    return Effect.runPromise(
+      Effect.provide(
+        appendSpreadsheetValuesRequest(accessToken, cfg.defaultSpreadsheetId, `${sheetName}!A:Z`, values),
+        FetchHttpClient.layer,
+      ),
     );
   }
 
@@ -993,12 +997,14 @@ export class OrganizationAgent extends AIChatAgent<Env> {
   }
 
   private async refreshGoogleAccessToken(refreshToken: string) {
-    const token = await refreshGoogleToken({
-      clientId: this.env.GOOGLE_OAUTH_CLIENT_ID,
-      clientSecret: Redacted.make(this.env.GOOGLE_OAUTH_CLIENT_SECRET),
-      redirectUri: this.env.GOOGLE_OAUTH_REDIRECT_URI,
-      refreshToken,
-    });
+    const token = await Effect.runPromise(
+      refreshGoogleToken({
+        clientId: this.env.GOOGLE_OAUTH_CLIENT_ID,
+        clientSecret: Redacted.make(this.env.GOOGLE_OAUTH_CLIENT_SECRET),
+        redirectUri: this.env.GOOGLE_OAUTH_REDIRECT_URI,
+        refreshToken,
+      }),
+    );
     const current = this.getGoogleConnectionRow();
     if (!current) {
       throw new Error("Google connection missing");
