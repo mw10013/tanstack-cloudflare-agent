@@ -5,10 +5,11 @@ import {
   notFound,
   Outlet,
   useMatchRoute,
+  useNavigate,
 } from "@tanstack/react-router";
 import { createServerFn, useServerFn } from "@tanstack/react-start";
 import { getRequest } from "@tanstack/react-start/server";
-import { Effect } from "effect";
+import { Cause, Effect } from "effect";
 import { ChevronsUpDown, LogOut } from "lucide-react";
 import { AppLogo } from "@/components/app-logo";
 import { Button } from "@/components/ui/button";
@@ -37,18 +38,42 @@ import {
 import { Auth } from "@/lib/Auth";
 import { signOutServerFn } from "@/lib/Auth";
 
-const beforeLoadServerFn = createServerFn({ method: "GET" })
+const switchOrganizationServerFn = createServerFn({ method: "POST" })
   .inputValidator((organizationId: string) => organizationId)
-  .handler(({ context: { runEffect, session }, data }) =>
+  .handler(({ data: organizationId, context: { runEffect } }) =>
     runEffect(
       Effect.gen(function* () {
-        const validSession = yield* Effect.fromNullishOr(session);
+        const request = getRequest();
+        const auth = yield* Auth;
+        yield* Effect.tryPromise(() =>
+          auth.api.setActiveOrganization({
+            headers: request.headers,
+            body: { organizationId },
+          }),
+        );
+      }),
+    ),
+  );
+
+const beforeLoadServerFn = createServerFn({ method: "GET" })
+  .inputValidator((organizationId: string) => organizationId)
+  .handler(({ context: { runEffect, session }, data: organizationId }) =>
+    runEffect(
+      Effect.gen(function* () {
+        const validSession = yield* Effect.fromNullishOr(session).pipe(
+          Effect.filterOrFail(
+            (s) => s.session.activeOrganizationId === organizationId,
+            () => new Cause.NoSuchElementError(),
+          ),
+        );
         const request = getRequest();
         const auth = yield* Auth;
         const organizations = yield* Effect.tryPromise(() =>
           auth.api.listOrganizations({ headers: request.headers }),
         );
-        const organization = organizations.find((org) => org.id === data);
+        const organization = organizations.find(
+          (org) => org.id === organizationId,
+        );
         if (!organization) return yield* Effect.die(notFound());
         return {
           organization,
@@ -359,6 +384,9 @@ function OrganizationSwitcher({
   organizations: AuthService["$Infer"]["Organization"][];
   organization: AuthService["$Infer"]["Organization"];
 }) {
+  const navigate = useNavigate();
+  const switchOrganizationFn = useServerFn(switchOrganizationServerFn);
+
   return (
     <DropdownMenu>
       <DropdownMenuTrigger
@@ -381,13 +409,14 @@ function OrganizationSwitcher({
           {organizations.map((org) => (
             <DropdownMenuItem
               key={org.id}
-              render={
-                <Link
-                  to="/app/$organizationId"
-                  // eslint-disable-next-line @typescript-eslint/no-unnecessary-type-conversion
-                  params={{ organizationId: String(org.id) }}
-                />
-              }
+              onClick={() => {
+                void switchOrganizationFn({ data: org.id }).then(() =>
+                  navigate({
+                    to: "/app/$organizationId",
+                    params: { organizationId: org.id },
+                  }),
+                );
+              }}
             >
               {org.name}
             </DropdownMenuItem>

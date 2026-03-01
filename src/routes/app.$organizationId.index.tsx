@@ -28,6 +28,11 @@ import { Repository } from "@/lib/Repository";
 
 const organizationIdSchema = Schema.Struct({ organizationId: Schema.String });
 
+const acceptInvitationSchema = Schema.Struct({
+  invitationId: Schema.String,
+  organizationId: Schema.String,
+});
+
 const invitationIdSchema = Schema.Struct({ invitationId: Schema.String });
 
 export const Route = createFileRoute("/app/$organizationId/")({
@@ -58,8 +63,8 @@ const getLoaderData = createServerFn({ method: "GET" })
   );
 
 const acceptInvitation = createServerFn({ method: "POST" })
-  .inputValidator(Schema.toStandardSchemaV1(invitationIdSchema))
-  .handler(({ data: { invitationId }, context: { runEffect } }) =>
+  .inputValidator(Schema.toStandardSchemaV1(acceptInvitationSchema))
+  .handler(({ data: { invitationId, organizationId }, context: { runEffect } }) =>
     runEffect(
       Effect.gen(function* () {
         const request = getRequest();
@@ -68,6 +73,15 @@ const acceptInvitation = createServerFn({ method: "POST" })
           auth.api.acceptInvitation({
             headers: request.headers,
             body: { invitationId },
+          }),
+        );
+        // better-auth's acceptInvitation sets activeOrganizationId to the
+        // invited org as a side effect — restore it to the current org so
+        // accepting doesn't silently switch the user's context.
+        yield* Effect.tryPromise(() =>
+          auth.api.setActiveOrganization({
+            headers: request.headers,
+            body: { organizationId },
           }),
         );
       }),
@@ -151,13 +165,14 @@ function InvitationItem({
 }) {
   const router = useRouter();
   const isHydrated = useHydrated();
+  const { organizationId } = Route.useParams();
   const acceptInvitationServerFn = useServerFn(acceptInvitation);
   const rejectInvitationServerFn = useServerFn(rejectInvitation);
 
   const acceptInvitationMutation = useMutation({
     mutationFn: () =>
       acceptInvitationServerFn({
-        data: { invitationId: invitation.id },
+        data: { invitationId: invitation.id, organizationId },
       }),
     onSuccess: () => {
       void router.invalidate();
