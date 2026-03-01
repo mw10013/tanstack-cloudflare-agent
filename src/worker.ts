@@ -1,11 +1,10 @@
-import type { AuthService } from "@/lib/auth-service";
 import type { RunEffect } from "@/lib/effect-services";
 import serverEntry from "@tanstack/react-start/server-entry";
 import { getAgentByName, routeAgentRequest } from "agents";
 import { Effect } from "effect";
 import * as Exit from "effect/Exit";
 import * as Schema from "effect/Schema";
-import { Auth } from "@/lib/Auth";
+import { Auth, type AuthTypes } from "@/lib/Auth";
 import { createD1SessionService } from "@/lib/d1-session-service";
 import { makeRunEffect } from "@/lib/effect-services";
 import { Repository } from "@/lib/Repository";
@@ -28,7 +27,7 @@ const r2QueueMessageSchema = Schema.Struct({
 export interface ServerContext {
   env: Env;
   runEffect: RunEffect;
-  session?: AuthService["$Infer"]["Session"];
+  session?: AuthTypes["$Infer"]["Session"];
 }
 
 declare module "@tanstack/react-start" {

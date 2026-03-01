@@ -307,6 +307,10 @@ export class Auth extends ServiceMap.Service<Auth>()("Auth", {
   static layer = Layer.effect(this, this.make);
 }
 
+export type AuthTypes = ReturnType<
+  typeof betterAuth<ReturnType<typeof createBetterAuthOptions>>
+>;
+
 export const signOutServerFn = createServerFn({ method: "POST" }).handler(
   ({ context: { runEffect } }) =>
     runEffect(
