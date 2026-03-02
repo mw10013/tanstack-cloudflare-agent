@@ -9,14 +9,20 @@ import {
 } from "@tanstack/react-router";
 import { TanStackRouterDevtoolsPanel } from "@tanstack/react-router-devtools";
 import { createServerFn } from "@tanstack/react-start";
+import { Effect } from "effect";
 import { ThemeProvider } from "better-themes";
 import { DefaultCatchBoundary } from "@/components/default-catch-boundary";
 import { NotFound } from "@/components/not-found";
 import appCss from "../styles.css?url";
 
 const getAnalyticsToken = createServerFn({ method: "GET" }).handler(
-  // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition
-  ({ context: { env } }) => ({ analyticsToken: env.ANALYTICS_TOKEN ?? "" }),
+  ({ context: { runEffect, env } }) =>
+    runEffect(
+      Effect.succeed({
+        // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition
+        analyticsToken: env.ANALYTICS_TOKEN ?? "",
+      }),
+    ),
 );
 
 export const Route = createRootRouteWithContext<{

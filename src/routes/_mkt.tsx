@@ -1,5 +1,6 @@
 import { createFileRoute, Link, Outlet } from "@tanstack/react-router";
 import { createServerFn, useServerFn } from "@tanstack/react-start";
+import { Effect } from "effect";
 import { siGithub } from "simple-icons";
 import { AppLogo } from "@/components/app-logo";
 import { ThemeSwitcher } from "@/components/theme-switcher";
@@ -8,11 +9,12 @@ import { Separator } from "@/components/ui/separator";
 import { signOutServerFn } from "@/lib/Auth";
 
 const beforeLoadServerFn = createServerFn().handler(
-  ({ context: { session } }) => {
-    return {
-      sessionUser: session?.user,
-    };
-  },
+  ({ context: { runEffect, session } }) =>
+    runEffect(
+      Effect.succeed({
+        sessionUser: session?.user,
+      }),
+    ),
 );
 
 export const Route = createFileRoute("/_mkt")({

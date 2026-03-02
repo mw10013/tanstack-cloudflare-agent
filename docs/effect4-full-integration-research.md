@@ -4,9 +4,9 @@ Date: 2026-03-02
 
 ## Objective
 
-Define concrete, low-risk steps to integrate Effect 4 more fully across route handlers, auth callbacks, decode boundaries, and layer composition.
+Integrate Effect 4 more fully with consistent `runEffect` usage, cleaner Better Auth callback execution, correct upload decode boundaries, and clearer layer composition.
 
-## Scope For This Iteration
+## Scope
 
 In scope:
 
@@ -15,73 +15,46 @@ In scope:
 3. resolve upload decode boundary policy,
 4. simplify layer composition readability without changing semantics.
 
-Deferred (explicitly):
+Deferred:
 
 1. broad `organization-agent.ts` refactor,
 2. Google/OAuth service extraction and caching redesign,
-3. full migration away from all `Effect.runPromise` across all domains.
+3. full migration away from all remaining `Effect.runPromise` calls.
 
-## Baseline
+## Current Status
 
-Runtime and request context are already Effect-first.
+Phase 1 complete:
 
-From `src/lib/effect-services.ts`:
+1. route `createServerFn` consistency fixed (`_mkt`, `__root` now use `runEffect`),
+2. upload route now keeps validator minimal and decodes via Effect in handler,
+3. Better Auth callbacks now use one shared runner (`runEffect`) instead of inline `Effect.runPromise(...)`.
 
-```ts
-const exit = await Effect.runPromiseExit(Effect.provide(effect, appLayer));
-if (Exit.isSuccess(exit)) return exit.value;
-```
+Phase 2 complete:
 
-From `src/worker.ts`:
+1. app layer composition refactored to named intermediate layers,
+2. dependency wiring remains explicit and equivalent.
 
-```ts
-const response = await serverEntry.fetch(request, {
-  context: {
-    env,
-    runEffect,
-    session: session ?? undefined,
-  },
-});
-```
+## Evidence
 
-Foundation is solid: request-scoped `runEffect`, app-layer provisioning, normalized Effect failure boundary.
+- total `Effect.runPromise(` in `src`: `4`
+- `Effect.runPromise(` in `src/lib/Auth.ts`: `0`
+- route files with `createServerFn` and no `runEffect`: none
+- upload route decode path now uses `Schema.decodeUnknownEffect(uploadFormSchema)`
 
-## Findings
+## Findings and Decisions
 
-### 1) Route/server-fn consistency gap is small and concrete
+### 1) `createServerFn` consistency
 
-All `server.handlers` route endpoints already use `runEffect`.
-
-Only two `createServerFn` handlers in routes do not:
+Previously missing:
 
 1. `src/routes/_mkt.tsx`
 2. `src/routes/__root.tsx`
 
-Current examples:
+Now both run through `runEffect`, matching the rest of route-level server-fn usage.
 
-```ts
-const beforeLoadServerFn = createServerFn().handler(
-  ({ context: { session } }) => ({ sessionUser: session?.user }),
-)
-```
+### 2) Upload decode boundary
 
-```ts
-const getAnalyticsToken = createServerFn({ method: "GET" }).handler(
-  ({ context: { env } }) => ({ analyticsToken: env.ANALYTICS_TOKEN ?? "" }),
-)
-```
-
-Implication: full consistency is low-effort.
-
-### 2) Upload decode boundary: validator is server-only, but decode should move into Effect pipeline
-
-Current `Schema.decodeUnknownSync` usage:
-
-- `src/organization-agent.ts`: 17
-- `src/lib/google-oauth-client.ts`: 2
-- `src/routes/app.$organizationId.upload.tsx`: 1
-
-TanStack Start behavior confirms `inputValidator` executes only on server path.
+TanStack Start `inputValidator` is server-only:
 
 From `refs/tan-start/packages/start-client-core/src/createServerFn.ts`:
 
@@ -103,46 +76,37 @@ if (context.env === 'client') {
 }
 ```
 
-Current upload validator (`src/routes/app.$organizationId.upload.tsx`):
+Implemented upload code shape:
 
 ```ts
-.inputValidator((data) => {
-  if (!(data instanceof FormData)) throw new Error("Expected FormData");
-  return Schema.decodeUnknownSync(uploadFormSchema)(Object.fromEntries(data));
-})
+const uploadFile = createServerFn({ method: "POST" })
+  .inputValidator((data) => {
+    if (!(data instanceof FormData)) throw new Error("Expected FormData");
+    return data;
+  })
+  .handler(({ context: { runEffect, session }, data }) =>
+    runEffect(
+      Effect.gen(function* () {
+        const upload = yield* Schema.decodeUnknownEffect(uploadFormSchema)(
+          Object.fromEntries(data),
+        );
+        // ... use upload.name / upload.file
+      }),
+    ),
+  );
 ```
 
-Recommendation for upload:
+Decision:
 
-1. keep validator as minimal shape gate (`FormData`),
-2. move schema decode into handler Effect via `Schema.decodeUnknownEffect(...)`,
-3. keep failures typed in Effect channel and handled through `runEffect`.
+1. keep validator as shape gate,
+2. perform schema decode in Effect pipeline,
+3. keep validation failures in Effect error channel.
 
-Show me what the code would look like.
+### 3) Better Auth callback runner strategy
 
-### 3) Better Auth callback integration: options
+Better Auth callbacks are async lifecycle hooks (`hooks`, `databaseHooks`), so they need Promise-based bridging.
 
-`src/lib/Auth.ts` has 5 inline callback calls to `Effect.runPromise(...)` (`117, 162, 192, 292, 304`).
-
-Better Auth model is async lifecycle callbacks.
-
-From `refs/better-auth/docs/content/docs/concepts/hooks.mdx`:
-
-- before hooks run before endpoint execution,
-- after hooks run after endpoint execution.
-
-From `refs/better-auth/docs/content/docs/reference/options.mdx`:
-
-- `databaseHooks` define async lifecycle hooks per model/event.
-
-Effect runner options:
-
-1. keep inline `Effect.runPromise(...)` (current),
-2. use one closure-scoped runner from `Effect.services` + `Effect.runPromiseWith(...)`,
-3. use `Effect.runPromiseExitWith(...)` where callback needs explicit exit/error mapping,
-4. use `ManagedRuntime` for explicit lifecycle/disposal.
-
-Relevant Effect APIs (`refs/effect4/packages/effect/src/Effect.ts`):
+Relevant Effect APIs:
 
 ```ts
 export const services: <R>() => Effect<ServiceMap.ServiceMap<R>, never, R>
@@ -150,120 +114,54 @@ export const runPromiseWith: <R>(services: ServiceMap.ServiceMap<R>) => ...
 export const runPromiseExitWith: <R>(services: ServiceMap.ServiceMap<R>) => ...
 ```
 
-Recommended now: option 2 as default, optional option 3 for callbacks that need explicit `Exit`-based error translation.
-
-Sketch in `Auth.make`:
+Implemented strategy in `Auth.make`:
 
 ```ts
-const services = yield* Effect.services();
-const run = Effect.runPromiseWith(services);
-const runExit = Effect.runPromiseExitWith(services);
+const runEffect = Effect.runPromiseWith(ServiceMap.empty());
 ```
 
-Use `run(...)` in all callback/hook sites.
+That runner is passed into Better Auth option construction and reused across callbacks.
 
-Rename run to runEffect.
+Decision:
 
-### 4) Can `runEffect` be passed/accessed in Better Auth database hooks?
+1. use shared `runEffect` runner (name aligned with app convention),
+2. avoid scattered inline `Effect.runPromise(...)` calls.
+
+### 4) Can worker `runEffect` be accessed from Better Auth DB hooks?
 
 Short answer: not directly in current architecture.
 
-Evidence:
+Why:
 
-1. `runEffect` is created in `src/worker.ts` per request and injected into TanStack Start request context (`serverEntry.fetch(..., { context: { runEffect, ... }})`).
-2. Better Auth hooks/database hooks in `src/lib/Auth.ts` are closures configured at `betterAuth(...)` construction time.
-3. Better Auth database hook signatures are `(entity, context: GenericEndpointContext | null)` (from `@better-auth/core` types).
-4. `GenericEndpointContext` contains Better Auth `AuthContext`, not app request context fields like `runEffect`.
-5. Better Auth internally allows null hook context:
+1. worker `runEffect` is request-context state passed into TanStack Start request context,
+2. Better Auth callbacks are configured at `betterAuth(...)` construction and receive Better Auth context,
+3. Better Auth hook context is `GenericEndpointContext | null`.
 
-From `node_modules/better-auth/dist/db/with-hooks.mjs`:
+From Better Auth runtime (`node_modules/better-auth/dist/db/with-hooks.mjs`):
 
 ```ts
 const context = await getCurrentAuthContext().catch(() => null);
 ```
 
-Conclusion:
+Decision:
 
-1. no stable path to worker `runEffect` inside database hooks,
-2. closure-scoped local runner in `Auth.make` is the right integration point,
-3. request-context tunneling into Better Auth hooks is possible only with high-coupling custom plumbing and not recommended for this scope.
+1. use closure-scoped runner inside `Auth.make`,
+2. do not attempt to tunnel worker request `runEffect` into Better Auth DB hooks.
 
-### 5) Layer composition readability: concrete refactor shape
+### 5) Layer composition readability
 
-Current `makeAppLayer` nested `Layer.provideMerge(...)` is correct but hard to read.
+Implemented `makeAppLayer` shape with explicit wiring:
 
-Naive flattening with only `Layer.mergeAll(...)` is not enough for dependent layers.
+1. `envLayer` (Cloudflare env + greeting + config provider),
+2. `runtimeLayer = Layer.provideMerge(FetchHttpClient.layer, envLayer)`,
+3. `d1Layer = Layer.provideMerge(D1.layer, runtimeLayer)`,
+4. `repositoryLayer = Layer.provideMerge(Repository.layer, d1Layer)`,
+5. `stripeLayer = Layer.provideMerge(Stripe.layer, repositoryLayer)`,
+6. final `appLayer = Layer.provideMerge(Auth.layer, stripeLayer)`.
 
-From `refs/effect4/packages/effect/src/Layer.ts`:
+This keeps behavior while replacing deep inline nesting with named intermediate steps.
 
-```ts
-export const mergeAll = <Layers ...>(...layers: Layers): Layer<..., Services<Layers[number]>>
-```
+## Remaining Deferred Work
 
-`mergeAll` merges outputs; it does not feed outputs into dependency inputs. Keep explicit wiring with `Layer.provide` / `Layer.provideMerge`.
-
-Concrete no-behavior-change shape:
-
-```ts
-const envLayer = Layer.succeedServices(
-  ServiceMap.make(CloudflareEnv, env)
-    .pipe(ServiceMap.add(Greeting, { greet: () => "Hello from Effect 4 ServiceMap!" }))
-    .pipe(
-      ServiceMap.add(
-        ConfigProvider.ConfigProvider,
-        ConfigProvider.fromUnknown(env),
-      ),
-    ),
-);
-
-const runtimeLayer = Layer.mergeAll(FetchHttpClient.layer, envLayer);
-const d1Layer = D1.layer.pipe(Layer.provide(runtimeLayer));
-const repositoryLayer = Repository.layer.pipe(Layer.provide(d1Layer));
-const stripeLayer = Stripe.layer.pipe(Layer.provide(runtimeLayer));
-const authLayer = Auth.layer.pipe(
-  Layer.provide(Layer.mergeAll(runtimeLayer, d1Layer, stripeLayer)),
-);
-
-const appLayer = Layer.mergeAll(
-  runtimeLayer,
-  d1Layer,
-  repositoryLayer,
-  stripeLayer,
-  authLayer,
-);
-```
-
-## Recommended Plan
-
-### Phase 1 (now)
-
-1. convert 2 remaining route `createServerFn` handlers to `runEffect`:
-   - `src/routes/_mkt.tsx`
-   - `src/routes/__root.tsx`
-2. upload route: keep `FormData` gate in validator, move schema decode into Effect pipeline.
-3. `src/lib/Auth.ts`: replace 5 inline `Effect.runPromise(...)` calls with one closure-scoped runner via `Effect.runPromiseWith(services)`.
-
-### Phase 2
-
-1. add `runPromiseExitWith` only where callback-level explicit error mapping is useful,
-2. refactor `makeAppLayer` to named intermediate layers,
-3. preserve exact dependency wiring semantics.
-
-### Phase 3 (deferred)
-
-1. `organization-agent.ts` decode/error/runtime cleanup,
-2. Google/OAuth service extraction and cache design.
-
-## Success Criteria
-
-1. every route-level `createServerFn` handler runs through `runEffect`,
-2. upload decode follows policy (minimal validator + Effect decode in handler),
-3. Better Auth callbacks no longer have scattered inline `Effect.runPromise(...)`,
-4. layer composition is readable while preserving behavior.
-
-## Evidence Snapshot
-
-- total `Effect.runPromise(` in `src`: 9
-- `Effect.runPromise(` in `src/lib/Auth.ts`: 5
-- `Schema.decodeUnknownSync` in `src`: 20
-- route files with `createServerFn` and no `runEffect`: `_mkt`, `__root`
+1. `organization-agent.ts` still has remaining `Effect.runPromise(...)` and broad sync decode usage,
+2. Google OAuth client and agent decode/runtime cleanup remain deferred by original scope.

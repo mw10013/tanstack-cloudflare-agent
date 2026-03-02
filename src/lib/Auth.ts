@@ -37,6 +37,7 @@ interface CreateBetterAuthOptions {
   db: D1Database;
   d1: D1["Service"];
   stripe: Stripe["Service"];
+  runEffect: <A, E>(effect: Effect.Effect<A, E>) => Promise<A>;
   kv: KVNamespace;
   betterAuthUrl: string;
   betterAuthSecret: Redacted.Redacted;
@@ -58,6 +59,7 @@ const createBetterAuthOptions = ({
   db,
   d1,
   stripe,
+  runEffect,
   kv,
   betterAuthUrl,
   betterAuthSecret,
@@ -107,16 +109,22 @@ const createBetterAuthOptions = ({
       },
     },
     hooks: {
-      before: createAuthMiddleware(async (ctx) => {
-        if (
-          ctx.path === "/subscription/upgrade" ||
-          ctx.path === "/subscription/billing-portal" ||
-          ctx.path === "/subscription/cancel-subscription"
-        ) {
-          console.log(`better-auth: hooks: before: ${ctx.path}`);
-          await Effect.runPromise(stripe.ensureBillingPortalConfiguration());
-        }
-      }),
+      before: createAuthMiddleware((ctx) =>
+        runEffect(
+          Effect.gen(function* () {
+            if (
+              ctx.path === "/subscription/upgrade" ||
+              ctx.path === "/subscription/billing-portal" ||
+              ctx.path === "/subscription/cancel-subscription"
+            ) {
+              yield* Effect.sync(() => {
+                console.log(`better-auth: hooks: before: ${ctx.path}`);
+              });
+              yield* stripe.ensureBillingPortalConfiguration();
+            }
+          }),
+        ),
+      ),
     },
     plugins: [
       magicLink({
@@ -158,52 +166,57 @@ const createBetterAuthOptions = ({
         subscription: {
           enabled: true,
           requireEmailVerification: true,
-          plans: async () => {
-            const plans = await Effect.runPromise(stripe.getPlans());
-            return plans.map((plan) => ({
-              name: plan.name,
-              priceId: plan.monthlyPriceId,
-              annualDiscountPriceId: plan.annualPriceId,
-              freeTrial: {
-                days: plan.freeTrialDays,
-                onTrialStart: (subscription) => {
-                  console.log(
-                    `stripe plugin: onTrialStart: ${plan.name} plan trial started for subscription ${subscription.id}`,
-                  );
-                  return Promise.resolve();
-                },
-                onTrialEnd: ({ subscription }) => {
-                  console.log(
-                    `stripe plugin: onTrialEnd: ${plan.name} plan trial ended for subscription ${subscription.id}`,
-                  );
-                  return Promise.resolve();
-                },
-                onTrialExpired: (subscription) => {
-                  console.log(
-                    `stripe plugin: onTrialExpired: ${plan.name} plan trial expired for subscription ${subscription.id}`,
-                  );
-                  return Promise.resolve();
-                },
-              },
-            }));
-          },
-          authorizeReference: async ({ user, referenceId, action }) => {
-            const result = Boolean(
-              await Effect.runPromise(
-                d1.first(
-                  d1
-                    .prepare(
-                      "select 1 from Member where userId = ? and organizationId = ? and role = 'owner'",
-                    )
-                    .bind(user.id, referenceId),
-                ),
+          plans: () =>
+            runEffect(
+              Effect.map(stripe.getPlans(), (plans) =>
+                plans.map((plan) => ({
+                  name: plan.name,
+                  priceId: plan.monthlyPriceId,
+                  annualDiscountPriceId: plan.annualPriceId,
+                  freeTrial: {
+                    days: plan.freeTrialDays,
+                    onTrialStart: (subscription) => {
+                      console.log(
+                        `stripe plugin: onTrialStart: ${plan.name} plan trial started for subscription ${subscription.id}`,
+                      );
+                      return Promise.resolve();
+                    },
+                    onTrialEnd: ({ subscription }) => {
+                      console.log(
+                        `stripe plugin: onTrialEnd: ${plan.name} plan trial ended for subscription ${subscription.id}`,
+                      );
+                      return Promise.resolve();
+                    },
+                    onTrialExpired: (subscription) => {
+                      console.log(
+                        `stripe plugin: onTrialExpired: ${plan.name} plan trial expired for subscription ${subscription.id}`,
+                      );
+                      return Promise.resolve();
+                    },
+                  },
+                })),
               ),
-            );
-            console.log(
-              `stripe plugin: authorizeReference: user ${user.id} is attempting to ${action} subscription for referenceId ${referenceId}, authorized: ${String(result)}`,
-            );
-            return result;
-          },
+            ),
+          authorizeReference: ({ user, referenceId, action }) =>
+            runEffect(
+              Effect.gen(function* () {
+                const result = Boolean(
+                  yield* d1.first(
+                    d1
+                      .prepare(
+                        "select 1 from Member where userId = ? and organizationId = ? and role = 'owner'",
+                      )
+                      .bind(user.id, referenceId),
+                  ),
+                );
+                yield* Effect.sync(() => {
+                  console.log(
+                    `stripe plugin: authorizeReference: user ${user.id} is attempting to ${action} subscription for referenceId ${referenceId}, authorized: ${String(result)}`,
+                  );
+                });
+                return result;
+              }),
+            ),
           onSubscriptionComplete: ({ subscription, plan }) => {
             console.log(
               `stripe plugin: onSubscriptionComplete: subscription ${subscription.id} completed for plan ${plan.name}`,
@@ -258,10 +271,15 @@ const createBetterAuthOptions = ({
     ],
   }) satisfies BetterAuthOptions;
 
+type BetterAuthInstance = ReturnType<
+  typeof betterAuth<ReturnType<typeof createBetterAuthOptions>>
+>;
+
 export class Auth extends ServiceMap.Service<Auth>()("Auth", {
   make: Effect.gen(function* () {
     const d1 = yield* D1;
     const stripe = yield* Stripe;
+    const runEffect: CreateBetterAuthOptions["runEffect"] = Effect.runPromise;
     const authConfig = yield* Config.all({
       betterAuthUrl: Config.nonEmptyString("BETTER_AUTH_URL"),
       betterAuthSecret: Config.redacted("BETTER_AUTH_SECRET"),
@@ -270,53 +288,57 @@ export class Auth extends ServiceMap.Service<Auth>()("Auth", {
     });
     const { KV, D1: db } = yield* CloudflareEnv;
 
-    const auth = betterAuth(
+    const auth: BetterAuthInstance = betterAuth(
       createBetterAuthOptions({
         db,
         d1,
         stripe,
+        runEffect,
         kv: KV,
         betterAuthUrl: authConfig.betterAuthUrl,
         betterAuthSecret: authConfig.betterAuthSecret,
         transactionalEmail: authConfig.transactionalEmail,
         stripeWebhookSecret: authConfig.stripeWebhookSecret,
-        databaseHookUserCreateAfter: async (user) => {
-          if (user.role === "user") {
-            const org = await auth.api.createOrganization({
-              body: {
-                name: `${user.email.charAt(0).toUpperCase() + user.email.slice(1)}'s Organization`,
-                slug: user.email.replace(/[^a-z0-9]/g, "-").toLowerCase(),
-                userId: user.id,
-              },
-            });
-            await Effect.runPromise(
-              d1.run(
+        databaseHookUserCreateAfter: (user) =>
+          runEffect(
+            Effect.gen(function* () {
+              if (user.role !== "user") return;
+              const org = yield* Effect.tryPromise(() =>
+                auth.api.createOrganization({
+                  body: {
+                    name: `${user.email.charAt(0).toUpperCase() + user.email.slice(1)}'s Organization`,
+                    slug: user.email.replace(/[^a-z0-9]/g, "-").toLowerCase(),
+                    userId: user.id,
+                  },
+                }),
+              );
+              yield* d1.run(
                 d1
                   .prepare(
                     "update Session set activeOrganizationId = ? where userId = ? and activeOrganizationId is null",
                   )
                   .bind(org.id, user.id),
-              ),
-            );
-          }
-        },
-        databaseHookSessionCreateBefore: async (session) => {
-          const activeOrganization = await Effect.runPromise(
-            d1.first<{ id: string }>(
-              d1
-                .prepare(
-                  "select id from Organization where id in (select organizationId from Member where userId = ? and role = 'owner')",
-                )
-                .bind(session.userId),
-            ),
-          );
-          return {
-            data: {
-              ...session,
-              activeOrganizationId: activeOrganization?.id ?? undefined,
-            },
-          };
-        },
+              );
+            }),
+          ),
+        databaseHookSessionCreateBefore: (session) =>
+          runEffect(
+            Effect.gen(function* () {
+              const activeOrganization = yield* d1.first<{ id: string }>(
+                d1
+                  .prepare(
+                    "select id from Organization where id in (select organizationId from Member where userId = ? and role = 'owner')",
+                  )
+                  .bind(session.userId),
+              );
+              return {
+                data: {
+                  ...session,
+                  activeOrganizationId: activeOrganization?.id ?? undefined,
+                },
+              };
+            }),
+          ),
       }),
     );
 

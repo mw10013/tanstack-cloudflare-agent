@@ -12,36 +12,27 @@ export const Greeting = ServiceMap.Service<{
   readonly greet: () => string;
 }>("Greeting");
 
-const makeAppLayer = (env: Env) =>
-  Layer.provideMerge(
-    Auth.layer,
-    Layer.provideMerge(
-      Stripe.layer,
-      Layer.provideMerge(
-        Repository.layer,
-        Layer.provideMerge(
-          D1.layer,
-          Layer.provideMerge(
-            FetchHttpClient.layer,
-            Layer.succeedServices(
-              ServiceMap.make(CloudflareEnv, env)
-                .pipe(
-                  ServiceMap.add(Greeting, {
-                    greet: () => "Hello from Effect 4 ServiceMap!",
-                  }),
-                )
-                .pipe(
-                  ServiceMap.add(
-                    ConfigProvider.ConfigProvider,
-                    ConfigProvider.fromUnknown(env),
-                  ),
-                ),
-            ),
-          ),
+const makeAppLayer = (env: Env) => {
+  const envLayer = Layer.succeedServices(
+    ServiceMap.make(CloudflareEnv, env)
+      .pipe(
+        ServiceMap.add(Greeting, {
+          greet: () => "Hello from Effect 4 ServiceMap!",
+        }),
+      )
+      .pipe(
+        ServiceMap.add(
+          ConfigProvider.ConfigProvider,
+          ConfigProvider.fromUnknown(env),
         ),
       ),
-    ),
   );
+  const runtimeLayer = Layer.provideMerge(FetchHttpClient.layer, envLayer);
+  const d1Layer = Layer.provideMerge(D1.layer, runtimeLayer);
+  const repositoryLayer = Layer.provideMerge(Repository.layer, d1Layer);
+  const stripeLayer = Layer.provideMerge(Stripe.layer, repositoryLayer);
+  return Layer.provideMerge(Auth.layer, stripeLayer);
+};
 
 type AppLayer = ReturnType<typeof makeAppLayer>;
 type AppR = Layer.Success<AppLayer>;
