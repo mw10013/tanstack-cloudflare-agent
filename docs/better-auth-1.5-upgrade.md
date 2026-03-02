@@ -1,10 +1,7 @@
 # Better Auth 1.5 Upgrade Research
 
 **Current version:** 1.4.19  
-**Target version:** 1.5.0 (released Feb 28, 2026)  
-**Note:** As of today (Mar 2, 2026), latest stable is still v1.4.20. The 1.5.0 blog post is live but GitHub shows `v1.5.0-beta.20` as the latest pre-release. The stable 1.5.0 may land very soon — monitor `npm info better-auth`.
-
-This is incorrect? Stable is 1.5.1?
+**Target version:** 1.5.1 (latest stable as of Mar 2, 2026)
 
 ---
 
@@ -85,13 +82,7 @@ The 1.5 Subscription table adds two new columns we don't have:
 | `billingInterval` | string? | The billing interval ('month', 'year') |
 | `stripeScheduleId` | string? | Stripe Subscription Schedule ID for pending plan changes |
 
-**Migration needed:**
-```sql
-alter table Subscription add column billingInterval text;
-alter table Subscription add column stripeScheduleId text;
-```
-
-Simply change the schema. We don't need to migrate since we can reset the database.
+**Action:** Add columns to `0001_init.sql` schema and reset the database.
 
 ### New Stripe Plugin Features (Non-Breaking)
 - **Seat-based billing**: `seatPriceId` on plan config, `seats` parameter on upgrade
@@ -122,7 +113,7 @@ npx auth generate  # Generate schema
 npx auth upgrade   # Upgrade better-auth
 ```
 
-We should probably remove better-auth cli dependency in package.json?
+**Action:** Remove `@better-auth/cli` from devDependencies.
 
 ### Adapter Extraction
 Adapters extracted to separate packages (`@better-auth/drizzle-adapter`, etc.). Main `better-auth` re-exports them, so existing imports still work. Since we're switching to native D1, this doesn't affect us.
@@ -155,47 +146,26 @@ New `/update-session` endpoint for updating custom session fields without re-aut
 ### Dependencies to Update
 ```json
 {
-  "better-auth": "1.5.0",
-  "@better-auth/core": "1.5.0",
-  "@better-auth/stripe": "1.5.0"
+  "better-auth": "1.5.1",
+  "@better-auth/stripe": "1.5.1"
 }
 ```
 
-### Dev Dependencies to Update
-```json
-{
-  "@better-auth/cli": "1.5.0"  // or switch to `npx auth` and remove this
-}
-```
-
-We should remove this, right?
-
-### Potential Removals
-- `@better-auth/core` — check if still needed separately with 1.5. Our d1-adapter imports `@better-auth/core/db/adapter`. If we remove the custom adapter, this dependency may be removable.
-
-Yes, let's try to remove this.
+### Dependencies to Remove
+- `@better-auth/core` — only used by our d1-adapter (`@better-auth/core/db/adapter`). Remove with the custom adapter.
+- `@better-auth/cli` (devDependency) — replaced by `npx auth`.
 
 ---
 
 ## 🔄 Migration Plan
 
 ### Phase 1: Preparation
-1. Create a branch for the upgrade
+1. Audit all imports from `better-auth`, `@better-auth/core`, `@better-auth/stripe`
+2. Run `grep -r "InferUser\|InferSession\|createAdapter\|onEmailVerification\|sendChangeEmailVerification" src/`
 
-Remove this step. No branch. We work in main.
-
-2. Audit all imports from `better-auth`, `@better-auth/core`, `@better-auth/stripe`
-3. Run `grep -r "InferUser\|InferSession\|createAdapter\|onEmailVerification\|sendChangeEmailVerification" src/`
-
-### Phase 2: Schema Migration
-1. Create new D1 migration:
-```sql
--- Migration: better-auth 1.5 upgrade
-alter table Subscription add column billingInterval text;
-alter table Subscription add column stripeScheduleId text;
-```
-
-No migration. Just change the schema since we will reset the database from scratch.
+### Phase 2: Schema Update
+1. Add `billingInterval text` and `stripeScheduleId text` to `Subscription` table in `0001_init.sql`
+2. Reset database from scratch
 
 ### Phase 3: Code Changes
 1. Update `package.json` dependencies
