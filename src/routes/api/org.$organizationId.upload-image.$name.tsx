@@ -1,7 +1,7 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { Config, Effect } from "effect";
 import { Auth } from "@/lib/Auth";
-import { CloudflareEnv } from "@/lib/effect-services";
+import { CloudflareEnv } from "@/lib/CloudflareEnv";
 
 export const Route = createFileRoute("/api/org/$organizationId/upload-image/$name")({
   server: {

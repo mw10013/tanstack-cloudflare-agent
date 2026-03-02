@@ -37,7 +37,7 @@ import {
   FieldLabel,
 } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
-import { CloudflareEnv } from "@/lib/effect-services";
+import { CloudflareEnv } from "@/lib/CloudflareEnv";
 import { organizationMessageSchema } from "@/organization-messages";
 
 const organizationIdSchema = Schema.Struct({

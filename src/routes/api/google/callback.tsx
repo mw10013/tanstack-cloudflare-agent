@@ -2,7 +2,7 @@ import { createFileRoute } from "@tanstack/react-router";
 import { Config, Effect } from "effect";
 import * as Option from "effect/Option";
 import { Auth } from "@/lib/Auth";
-import { CloudflareEnv } from "@/lib/effect-services";
+import { CloudflareEnv } from "@/lib/CloudflareEnv";
 import { exchangeGoogleAuthorizationCode } from "@/lib/google-oauth-client";
 
 export const Route = createFileRoute("/api/google/callback")({

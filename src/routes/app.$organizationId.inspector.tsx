@@ -1,7 +1,7 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { createServerFn } from "@tanstack/react-start";
 import { Effect } from "effect";
-import { CloudflareEnv } from "@/lib/effect-services";
+import { CloudflareEnv } from "@/lib/CloudflareEnv";
 
 const inspectorServerFn = createServerFn({ method: "GET" })
   .inputValidator((organizationId: string) => organizationId)

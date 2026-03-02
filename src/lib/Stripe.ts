@@ -5,7 +5,7 @@ import * as Option from "effect/Option";
 import * as Schema from "effect/Schema";
 import * as StripeClient from "stripe";
 import { planData, Plan as PlanSchema } from "@/lib/Domain";
-import { CloudflareEnv } from "./effect-services";
+import { CloudflareEnv } from "@/lib/CloudflareEnv";
 
 type Price = StripeTypes.Price;
 type PriceWithLookupKey = Price & { lookup_key: string };

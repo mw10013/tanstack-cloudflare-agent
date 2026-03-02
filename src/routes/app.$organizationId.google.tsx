@@ -21,7 +21,7 @@ import {
 } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { buildGoogleAuthorizationRequest } from "@/lib/google-oauth-client";
-import { CloudflareEnv } from "@/lib/effect-services";
+import { CloudflareEnv } from "@/lib/CloudflareEnv";
 
 const searchSchema = Schema.Struct({
   google: Schema.optionalKey(

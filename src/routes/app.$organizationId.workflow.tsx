@@ -30,7 +30,7 @@ import {
 } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
 import { Spinner } from "@/components/ui/spinner";
-import { CloudflareEnv } from "@/lib/effect-services";
+import { CloudflareEnv } from "@/lib/CloudflareEnv";
 import { organizationMessageSchema } from "@/organization-messages";
 
 const getLoaderData = createServerFn({ method: "GET" })

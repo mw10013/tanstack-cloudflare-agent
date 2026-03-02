@@ -10,7 +10,7 @@ import { tanstackStartCookies } from "better-auth/tanstack-start";
 import { Cause, Config, Data, Effect, Layer, Redacted, ServiceMap } from "effect";
 import { D1 } from "./D1";
 import { Stripe } from "./Stripe";
-import { CloudflareEnv } from "./effect-services";
+import { CloudflareEnv } from "@/lib/CloudflareEnv";
 
 export class AuthError extends Data.TaggedError("AuthError")<{
   readonly op: string;
