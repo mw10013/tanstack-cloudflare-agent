@@ -2,262 +2,224 @@
 
 Date: 2026-03-02
 
-## TL;DR
+## Objective
 
-Effect 4 is already core to this app (`ServiceMap.Service`, `Layer.effect`, `Config`, `runEffect`). Biggest remaining gap is not route handlers; it's imperative islands (mainly `organization-agent.ts` + Better Auth plugin callbacks) where errors/decoding/runtime are still ad-hoc.
+Define practical next steps to integrate Effect 4 more fully in this codebase, with minimal risk and clear scope.
 
-Highest leverage path:
+## Scope For This Iteration
 
-1. move sync schema decoding and thrown `Error` into Effect error channels,
+In scope:
 
-Above needs much more research because schemas are used on the client where we won't be running effects.
+1. make route/server-fn usage of `runEffect` fully consistent,
+2. improve Better Auth hook/callback integration with Effect,
+3. clarify `decodeUnknownSync` policy vs effectful decode,
+4. simplify layer composition readability without changing semantics.
 
-2. centralize non-route Effect execution via a managed runtime bridge,
+Deferred (explicitly):
 
-More details needed here. Also, we should convert all routes, no matter how trivial to use runEffect for consistency.
+1. broad `organization-agent.ts` refactor,
+2. Google/OAuth service extraction and caching redesign,
+3. full migration away from all `Effect.runPromise` across all domains.
 
-3. turn Google/OAuth + agent integration into services/layers (instead of direct `Effect.runPromise` and module-level mutable cache).
+## Baseline
 
-I think I want to defer this for now since can of worms
+Runtime and request context are already Effect-first.
 
-## Current State (What Is Already Good)
-
-### 1) V4 service model is in place
-
-`src/lib/effect-services.ts` composes app dependencies with layers and `ServiceMap`:
-
-```ts
-const makeAppLayer = (env: Env) =>
-  Layer.provideMerge(
-    Auth.layer,
-    Layer.provideMerge(
-      Stripe.layer,
-      Layer.provideMerge(
-        Repository.layer,
-        Layer.provideMerge(
-          D1.layer,
-          Layer.provideMerge(
-            FetchHttpClient.layer,
-            Layer.succeedServices(
-              ServiceMap.make(CloudflareEnv, env)
-```
-
-This waterfall looks dreadful. Any way to simplify?
-
-### 2) Route/API handlers mostly run in Effect
-
-`runEffect(...)` is consistently used across server fns/routes (`src/routes/**`, `src/worker.ts`).
-
-We want all route/api handlers to use effect.
-
-### 3) HTTP client migration started and is idiomatic
-
-We can defer this for now.
-
-`src/lib/google-client.ts` already uses Effect HTTP modules and typed error mapping:
+From `src/lib/effect-services.ts`:
 
 ```ts
-HttpClient.execute(request).pipe(
-  Effect.flatMap(HttpClientResponse.filterStatusOk),
-  Effect.flatMap(HttpClientResponse.schemaBodyJson(schema)),
-  Effect.catchTag("HttpClientError", toGoogleApiError),
-)
+const exit = await Effect.runPromiseExit(Effect.provide(effect, appLayer));
+if (Exit.isSuccess(exit)) return exit.value;
 ```
 
-## Gaps To “More Fully Integrated” Effect 4
+From `src/worker.ts`:
 
-### A) Sync schema decode + throw-heavy paths still common outside route layer
+```ts
+const response = await serverEntry.fetch(request, {
+  context: {
+    env,
+    runEffect,
+    session: session ?? undefined,
+  },
+});
+```
 
-The google stuff is out of scope for now. sync schema decode requires more investigation since some schemas are used in browser where we are not running effects. That said, in general, we want schemas to decode within effect and use effects error channel.
+So the foundation is solid: request-scoped app layer + normalized Effect error boundary.
 
-Repo snapshot:
+## Findings
 
-- `Schema.decodeUnknownSync` in `src`: 20 occurrences.
-- many in `src/organization-agent.ts`.
-- still in OAuth module (`src/lib/google-oauth-client.ts`).
+### 1) Route/server-fn consistency gap is small and concrete
+
+All `server.handlers` route endpoints already use `runEffect`.
+
+Only two `createServerFn` handlers in routes do not:
+
+1. `src/routes/_mkt.tsx`
+2. `src/routes/__root.tsx`
 
 Examples:
 
 ```ts
-const predictions = Schema.decodeUnknownSync(ResnetPredictions)(response)
-```
-
-```ts
-return Schema.decodeUnknownSync(GoogleTokenResponse)(tokenResponse)
-```
-
-Impact: decode failures become thrown exceptions, bypassing typed error channels (`Effect.catchTag`, cause-based handling).
-
-### B) Multiple imperative `Effect.runPromise(...)` islands
-
-google stuff is out of scope. also, agent for now. however, we need to figure out better effect integration for better-auth database hooks
-
-Repo snapshot:
-
-- `Effect.runPromise(` in `src`: 9 occurrences.
-- concentrated in `organization-agent.ts` + `Auth.ts` callback wiring.
-
-Examples:
-
-```ts
-const data = await Effect.runPromise(
-  Effect.provide(listDriveSpreadsheetsRequest(accessToken), FetchHttpClient.layer),
+const beforeLoadServerFn = createServerFn().handler(
+  ({ context: { session } }) => ({ sessionUser: session?.user }),
 )
 ```
 
 ```ts
-await Effect.runPromise(stripe.ensureBillingPortalConfiguration())
+const getAnalyticsToken = createServerFn({ method: "GET" }).handler(
+  ({ context: { env } }) => ({ analyticsToken: env.ANALYTICS_TOKEN ?? "" }),
+)
 ```
 
-Impact: runtime bridging pattern is duplicated; error normalization differs by callsite.
+Implication: full consistency is low-effort.
 
-### C) Runtime/layer boundary not explicit for non-route execution
+### 2) `decodeUnknownSync` concern: client risk is lower than assumed
 
-Route edge has `makeRunEffect`, but agent methods and 3rd-party callbacks run ad-hoc.
+Current usage count is:
 
-Effect docs call out `ManagedRuntime` as the integration boundary for non-Effect frameworks.
+- `src/organization-agent.ts`: 17
+- `src/lib/google-oauth-client.ts`: 2
+- `src/routes/app.$organizationId.upload.tsx`: 1
 
-Are you really advocating ManagedRuntime? Is it necessary in our case? Its lifecycle would need to be managed (dispose), which is easy to forget. I'm wondering if runEffect fn that has all the deps baked in would suffice, but needs to be reseearched deeply
+Key point: TanStack Start executes `inputValidator` on the server path.
 
-
-From `refs/effect4/ai-docs/src/03_integration/10_managed-runtime.ts`:
+From `refs/tan-start/packages/start-client-core/src/createServerFn.ts`:
 
 ```ts
-export const runtime = ManagedRuntime.make(TodoRepo.layer, {
-  memoMap: appMemoMap
-})
+if (
+  'inputValidator' in nextMiddleware.options &&
+  nextMiddleware.options.inputValidator &&
+  env === 'server'
+) {
+  ctx.data = await execValidator(...)
+}
 ```
+
+And compiler behavior removes validator call from client build:
+
+From `refs/tan-start/packages/start-plugin-core/src/start-compiler-plugin/handleCreateServerFn.ts`:
+
+```ts
+if (context.env === 'client') {
+  stripMethodCall(inputValidator.callPath)
+}
+```
+
+Practical policy:
+
+1. `decodeUnknownSync` is acceptable in server-only synchronous edges.
+2. inside Effect pipelines, prefer `Schema.decodeUnknownEffect` to keep typed errors in Effect channel.
+
+Let's get this fixed for upload.
+
+### 3) `ManagedRuntime` is optional here, not mandatory
+
+`ManagedRuntime` is valid, but not required for current goals.
 
 From `refs/effect4/packages/effect/src/ManagedRuntime.ts`:
 
 ```ts
-readonly runPromise: <A, E>(effect: Effect.Effect<A, E, R>, ...) => Promise<A>
+readonly dispose: () => Promise<void>
 ```
-
-### D) Manual mutable caching in OAuth discovery
-
-Out of scope for now..
-
-`src/lib/google-oauth-client.ts` uses module mutable state:
 
 ```ts
-let cachedConfig: Oidc.Configuration | undefined;
-let cachedConfigKey: string | undefined;
+dispose(): Promise<void> { return Effect.runPromise(self.disposeEffect) }
 ```
 
-Effect-native cache primitives (`Effect.cached`, `Ref`) would keep this in Effect model.
+So it adds explicit lifecycle management.
 
-## Relevant Effect 4 Guidance (Docs Excerpts)
+Given existing request-scoped `runEffect` in worker context, a simpler path is better now:
 
-From `refs/effect4/migration/services.md`:
+- keep request-scoped `runEffect`,
+- use `Effect.services` + `Effect.runPromiseWith(services)` in callback-heavy areas.
 
-- “all of these have been replaced by `ServiceMap.Service`”
-- “Prefer `yield*` over `use` in most cases.”
-- “compose layers before providing is still the recommended pattern” (paired with memoization doc below).
+From `refs/effect4/packages/effect/src/Effect.ts`:
 
-From `refs/effect4/migration/layer-memoization.md`:
+```ts
+export const services: <R>() => Effect<ServiceMap.ServiceMap<R>, never, R>
+export const runPromiseWith: <R>(services: ServiceMap.ServiceMap<R>) => ...
+```
 
-- v4 memoizes layers across `Effect.provide` calls,
-- but still: “composing layers before providing is still the recommended pattern”.
+### 4) Better Auth hooks are the highest-value in-scope integration target
 
-From `refs/effect4/migration/yieldable.md`:
+Current `Auth.ts` has 5 inline `Effect.runPromise(...)` in Better Auth callbacks.
 
-- `Config` and `ServiceMap.Service` are `Yieldable`, intended for `yield*` in `Effect.gen`.
+Locations: `src/lib/Auth.ts:117,162,192,292,304`.
 
-From `refs/effect4/MIGRATION.md`:
+Better Auth docs model hooks/databaseHooks as async lifecycle callbacks.
 
-- `effect/unstable/*` modules are expected in v4 beta (already true in this repo for HTTP).
+From `refs/better-auth/docs/content/docs/concepts/hooks.mdx`:
 
-## Recommended Target Architecture
+- before hooks run before endpoint execution,
+- after hooks run after endpoint execution.
 
-### 1) One runtime bridge per execution boundary
+From `refs/better-auth/docs/content/docs/concepts/database.mdx`:
 
-Keep current `runEffect` for TanStack Start context. Add explicit managed runtime bridge(s) for:
+- database hooks are lifecycle hooks for `user`/`session`/`account`.
 
-- `OrganizationAgent` internals,    This is out of scope for now.
-- Better Auth plugin callbacks.     Can runEffect be used somehow?
+Recommended integration pattern in `Auth.make`:
 
-Goal: stop scattering `Effect.runPromise` callsites.
+1. capture services once via `yield* Effect.services<...>()`,
+2. create `const run = Effect.runPromiseWith(services)`,
+3. reuse `run(...)` in all Better Auth callbacks.
 
-### 2) Convert “imperative hot spots” into services
+This removes repeated ad-hoc runners while avoiding ManagedRuntime lifecycle overhead.
 
-Candidate services:
+Research different approaches. I want to see what other options there are. Also see if there is a way to pass runEffect or access runEffect from the database hook or the surrounding closure at construction time. I would prefer to get and use runEffect somehow, but I'm not sure there is a way.
 
-These are out of scope for now
+### 5) Layer composition readability can improve, but semantics matter
 
-- `GoogleOAuth` service (discovery, exchange, refresh, cache).
-- `OrganizationAgentRepository` service (all SQL decode/write operations).
-- optional `OrganizationWorkflowService` for workflow orchestration + error mapping.
+Current `makeAppLayer` nested `Layer.provideMerge(...)` is hard to read.
 
-### 3) Normalize decoding + errors into typed channels
+Naively flattening with `Layer.mergeAll(...)` alone is unsafe for dependent layers.
 
-- Replace `decodeUnknownSync` with `decodeUnknownEffect` at async boundaries.
-- Replace plain `new Error(...)` throws in domain flow with tagged errors (like existing `D1Error`, `StripeError`, `AuthError`, `GoogleApiError`).
+From `refs/effect4/packages/effect/src/Layer.ts`:
 
-### 4) HTTP client provisioning consistency
+```ts
+export const mergeAll ... : Layer<Success<...>, Error<...>, Services<...>>
+```
 
-`FetchHttpClient.layer` is already in app layer. Avoid re-providing it ad-hoc in agent methods; provide once at runtime/service boundary.
+`mergeAll` combines outputs; it does not automatically satisfy inter-layer dependencies unless composition is structured correctly.
 
-## Phased Plan
+Recommended refactor style:
 
-### Phase 1 (Low risk, high ROI)
+1. define named intermediate layers,
+2. keep dependency wiring explicit with `Layer.provide` / `Layer.provideMerge`,
+3. reduce nesting using `pipe(...)` + intermediate constants.
 
-1. Create `OrganizationAgentError` tagged errors for known failures (`invalid_event_time`, `google_not_connected`, `token_refresh_failed`, etc.).
-2. Replace `decodeUnknownSync` in `organization-agent.ts` and `google-oauth-client.ts` with effectful decode in typed pipelines.
-3. Introduce one local runtime helper for agent methods; replace direct `Effect.runPromise(...)` usages.
+Need details on what that would look like.
 
-### Phase 2 (Service extraction)
+## Recommended Plan
 
-1. Add `GoogleOAuth` service/layer; move discovery cache into `Effect.cached`/`Ref`.
-2. Add `GoogleSheets` service exposing Effect-returning operations used by agent callables.
-3. Refactor `Auth.ts` callback internals to call shared runtime bridge helper (instead of raw `Effect.runPromise` inline).
+### Phase 1 (now)
 
-### Phase 3 (Observability/testability)
+1. convert 2 remaining `createServerFn` handlers to `runEffect`:
+   - `src/routes/_mkt.tsx`
+   - `src/routes/__root.tsx`
+2. in `src/lib/Auth.ts`, replace 5 inline `Effect.runPromise(...)` callback calls with shared local runner based on `Effect.runPromiseWith(services)`.
 
-1. Wrap core service methods with `Effect.fn("...")` naming + `Effect.withSpan` on key workflows.
-2. Add layer-based tests for services (swap test layers for DB/HTTP where possible).
+### Phase 2
 
-## Concrete Backlog (File-by-file)
+1. refactor `makeAppLayer` readability with named intermediate layers,
+2. preserve existing dependency wiring semantics,
+3. no behavior change.
 
-1. `src/organization-agent.ts`
-- remove direct `Effect.runPromise(...)` + `Effect.provide(...FetchHttpClient.layer)` callsites.
-- replace all `Schema.decodeUnknownSync(...)` with effectful decode at async boundaries.
-- replace thrown `Error` in domain paths with tagged errors.
+### Phase 3 (deferred by scope)
 
-2. `src/lib/google-oauth-client.ts`
-- replace `Schema.decodeUnknownSync` with `Schema.decodeUnknownEffect`.
-- move `cachedConfig` mutable module state to Effect-native cache service.
+1. `organization-agent.ts` decode/error/runtime cleanup,
+2. Google/OAuth service extraction and cache design.
 
-3. `src/lib/Auth.ts`
-- isolate callback-time Effect execution in shared bridge helper/runtime.
-- keep plugin API Promise interface, but remove repeated inline runtime wiring.
+## Success Criteria
 
-4. `src/lib/effect-services.ts`
-- optionally expose a reusable managed runtime constructor if you want one style for all non-route Effect execution.
+1. every route-level `createServerFn` handler runs through `runEffect`,
+2. Better Auth callbacks no longer have scattered inline `Effect.runPromise(...)` calls,
+3. decode policy documented and applied consistently:
+   - sync decode allowed only at server-only sync boundaries,
+   - effectful decode inside Effect pipelines.
 
-## Suggested Success Criteria
+## Evidence Snapshot
 
-1. `Schema.decodeUnknownSync` reduced to UI-only/form edge cases, not domain orchestration.
-2. no direct `Effect.runPromise` in domain modules (`organization-agent`, auth callback internals).
-3. all non-trivial domain failures represented by tagged errors.
-4. one documented runtime bridge pattern used consistently.
-
-## Risks / Tradeoffs
-
-1. Agent framework APIs are Promise-based; some bridge code remains necessary.
-2. `effect/unstable/http/*` is beta/unstable; pin versions and isolate wrappers.
-3. Full service extraction is structural work; do in phases to avoid large regressions.
-
-## Appendix: Quick Evidence Snapshot
-
-- `Schema.decodeUnknownSync` count in `src`: 20
-- `Effect.runPromise(` count in `src`: 9
-- `FetchHttpClient.layer` re-provided ad-hoc in agent: 3 callsites
-
-Key files:
-
-- `src/lib/effect-services.ts`
-- `src/organization-agent.ts`
-- `src/lib/google-client.ts`
-- `src/lib/google-oauth-client.ts`
-- `src/lib/Auth.ts`
+- total `Effect.runPromise(` in `src`: 9
+- `Effect.runPromise(` in `src/lib/Auth.ts`: 5
+- `Schema.decodeUnknownSync` in `src`: 20
+- route `createServerFn` handlers not using `runEffect`: 2 files (`_mkt`, `__root`)
