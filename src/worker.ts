@@ -1,4 +1,3 @@
-import type { RunEffect } from "@/lib/effect-services";
 import serverEntry from "@tanstack/react-start/server-entry";
 import { getAgentByName, routeAgentRequest } from "agents";
 import { Effect } from "effect";
@@ -26,7 +25,7 @@ const r2QueueMessageSchema = Schema.Struct({
 
 export interface ServerContext {
   env: Env;
-  runEffect: RunEffect;
+  runEffect: ReturnType<typeof makeRunEffect>;
   session?: AuthTypes["$Infer"]["Session"];
 }
 

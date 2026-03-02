@@ -23,9 +23,6 @@ const makeAppLayer = (env: Env) => {
   return Layer.provideMerge(Auth.layer, stripeLayer);
 };
 
-type AppLayer = ReturnType<typeof makeAppLayer>;
-type AppR = Layer.Success<AppLayer>;
-
 /**
  * Runs an Effect within the app layer, converting failures to throwable values
  * compatible with TanStack Start's server function error serialization.
@@ -58,7 +55,9 @@ type AppR = Layer.Success<AppLayer>;
  */
 export const makeRunEffect = (env: Env) => {
   const appLayer = makeAppLayer(env);
-  return async <A, E>(effect: Effect.Effect<A, E, AppR>): Promise<A> => {
+  return async <A, E>(
+    effect: Effect.Effect<A, E, Layer.Success<ReturnType<typeof makeAppLayer>>>,
+  ): Promise<A> => {
     const exit = await Effect.runPromiseExit(Effect.provide(effect, appLayer));
     if (Exit.isSuccess(exit)) return exit.value;
     const squashed = Cause.squash(exit.cause);
@@ -72,5 +71,3 @@ export const makeRunEffect = (env: Env) => {
     throw new Error(pretty);
   };
 };
-
-export type RunEffect = ReturnType<typeof makeRunEffect>;
