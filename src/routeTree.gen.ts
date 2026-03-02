@@ -26,17 +26,12 @@ import { Route as MktPricingRouteImport } from './routes/_mkt.pricing'
 import { Route as AppOrganizationIdIndexRouteImport } from './routes/app.$organizationId.index'
 import { Route as AppOrganizationIdWorkflowRouteImport } from './routes/app.$organizationId.workflow'
 import { Route as AppOrganizationIdUploadRouteImport } from './routes/app.$organizationId.upload'
-import { Route as AppOrganizationIdStripeRouteImport } from './routes/app.$organizationId.stripe'
-import { Route as AppOrganizationIdRepositoryRouteImport } from './routes/app.$organizationId.repository'
 import { Route as AppOrganizationIdMembersRouteImport } from './routes/app.$organizationId.members'
 import { Route as AppOrganizationIdInvitationsRouteImport } from './routes/app.$organizationId.invitations'
 import { Route as AppOrganizationIdInspectorRouteImport } from './routes/app.$organizationId.inspector'
 import { Route as AppOrganizationIdGoogleRouteImport } from './routes/app.$organizationId.google'
-import { Route as AppOrganizationIdEffectRouteImport } from './routes/app.$organizationId.effect'
-import { Route as AppOrganizationIdD1RouteImport } from './routes/app.$organizationId.d1'
 import { Route as AppOrganizationIdChatRouteImport } from './routes/app.$organizationId.chat'
 import { Route as AppOrganizationIdBillingRouteImport } from './routes/app.$organizationId.billing'
-import { Route as AppOrganizationIdAuthRouteImport } from './routes/app.$organizationId.auth'
 import { Route as AppOrganizationIdAgentRouteImport } from './routes/app.$organizationId.agent'
 import { Route as ApiGoogleCallbackRouteImport } from './routes/api/google/callback'
 import { Route as ApiAuthSplatRouteImport } from './routes/api/auth/$'
@@ -128,17 +123,6 @@ const AppOrganizationIdUploadRoute = AppOrganizationIdUploadRouteImport.update({
   path: '/upload',
   getParentRoute: () => AppOrganizationIdRoute,
 } as any)
-const AppOrganizationIdStripeRoute = AppOrganizationIdStripeRouteImport.update({
-  id: '/stripe',
-  path: '/stripe',
-  getParentRoute: () => AppOrganizationIdRoute,
-} as any)
-const AppOrganizationIdRepositoryRoute =
-  AppOrganizationIdRepositoryRouteImport.update({
-    id: '/repository',
-    path: '/repository',
-    getParentRoute: () => AppOrganizationIdRoute,
-  } as any)
 const AppOrganizationIdMembersRoute =
   AppOrganizationIdMembersRouteImport.update({
     id: '/members',
@@ -162,16 +146,6 @@ const AppOrganizationIdGoogleRoute = AppOrganizationIdGoogleRouteImport.update({
   path: '/google',
   getParentRoute: () => AppOrganizationIdRoute,
 } as any)
-const AppOrganizationIdEffectRoute = AppOrganizationIdEffectRouteImport.update({
-  id: '/effect',
-  path: '/effect',
-  getParentRoute: () => AppOrganizationIdRoute,
-} as any)
-const AppOrganizationIdD1Route = AppOrganizationIdD1RouteImport.update({
-  id: '/d1',
-  path: '/d1',
-  getParentRoute: () => AppOrganizationIdRoute,
-} as any)
 const AppOrganizationIdChatRoute = AppOrganizationIdChatRouteImport.update({
   id: '/chat',
   path: '/chat',
@@ -183,11 +157,6 @@ const AppOrganizationIdBillingRoute =
     path: '/billing',
     getParentRoute: () => AppOrganizationIdRoute,
   } as any)
-const AppOrganizationIdAuthRoute = AppOrganizationIdAuthRouteImport.update({
-  id: '/auth',
-  path: '/auth',
-  getParentRoute: () => AppOrganizationIdRoute,
-} as any)
 const AppOrganizationIdAgentRoute = AppOrganizationIdAgentRouteImport.update({
   id: '/agent',
   path: '/agent',
@@ -232,17 +201,12 @@ export interface FileRoutesByFullPath {
   '/api/auth/$': typeof ApiAuthSplatRoute
   '/api/google/callback': typeof ApiGoogleCallbackRoute
   '/app/$organizationId/agent': typeof AppOrganizationIdAgentRoute
-  '/app/$organizationId/auth': typeof AppOrganizationIdAuthRoute
   '/app/$organizationId/billing': typeof AppOrganizationIdBillingRoute
   '/app/$organizationId/chat': typeof AppOrganizationIdChatRoute
-  '/app/$organizationId/d1': typeof AppOrganizationIdD1Route
-  '/app/$organizationId/effect': typeof AppOrganizationIdEffectRoute
   '/app/$organizationId/google': typeof AppOrganizationIdGoogleRoute
   '/app/$organizationId/inspector': typeof AppOrganizationIdInspectorRoute
   '/app/$organizationId/invitations': typeof AppOrganizationIdInvitationsRoute
   '/app/$organizationId/members': typeof AppOrganizationIdMembersRoute
-  '/app/$organizationId/repository': typeof AppOrganizationIdRepositoryRoute
-  '/app/$organizationId/stripe': typeof AppOrganizationIdStripeRoute
   '/app/$organizationId/upload': typeof AppOrganizationIdUploadRoute
   '/app/$organizationId/workflow': typeof AppOrganizationIdWorkflowRoute
   '/app/$organizationId/': typeof AppOrganizationIdIndexRoute
@@ -263,17 +227,12 @@ export interface FileRoutesByTo {
   '/api/auth/$': typeof ApiAuthSplatRoute
   '/api/google/callback': typeof ApiGoogleCallbackRoute
   '/app/$organizationId/agent': typeof AppOrganizationIdAgentRoute
-  '/app/$organizationId/auth': typeof AppOrganizationIdAuthRoute
   '/app/$organizationId/billing': typeof AppOrganizationIdBillingRoute
   '/app/$organizationId/chat': typeof AppOrganizationIdChatRoute
-  '/app/$organizationId/d1': typeof AppOrganizationIdD1Route
-  '/app/$organizationId/effect': typeof AppOrganizationIdEffectRoute
   '/app/$organizationId/google': typeof AppOrganizationIdGoogleRoute
   '/app/$organizationId/inspector': typeof AppOrganizationIdInspectorRoute
   '/app/$organizationId/invitations': typeof AppOrganizationIdInvitationsRoute
   '/app/$organizationId/members': typeof AppOrganizationIdMembersRoute
-  '/app/$organizationId/repository': typeof AppOrganizationIdRepositoryRoute
-  '/app/$organizationId/stripe': typeof AppOrganizationIdStripeRoute
   '/app/$organizationId/upload': typeof AppOrganizationIdUploadRoute
   '/app/$organizationId/workflow': typeof AppOrganizationIdWorkflowRoute
   '/app/$organizationId': typeof AppOrganizationIdIndexRoute
@@ -299,17 +258,12 @@ export interface FileRoutesById {
   '/api/auth/$': typeof ApiAuthSplatRoute
   '/api/google/callback': typeof ApiGoogleCallbackRoute
   '/app/$organizationId/agent': typeof AppOrganizationIdAgentRoute
-  '/app/$organizationId/auth': typeof AppOrganizationIdAuthRoute
   '/app/$organizationId/billing': typeof AppOrganizationIdBillingRoute
   '/app/$organizationId/chat': typeof AppOrganizationIdChatRoute
-  '/app/$organizationId/d1': typeof AppOrganizationIdD1Route
-  '/app/$organizationId/effect': typeof AppOrganizationIdEffectRoute
   '/app/$organizationId/google': typeof AppOrganizationIdGoogleRoute
   '/app/$organizationId/inspector': typeof AppOrganizationIdInspectorRoute
   '/app/$organizationId/invitations': typeof AppOrganizationIdInvitationsRoute
   '/app/$organizationId/members': typeof AppOrganizationIdMembersRoute
-  '/app/$organizationId/repository': typeof AppOrganizationIdRepositoryRoute
-  '/app/$organizationId/stripe': typeof AppOrganizationIdStripeRoute
   '/app/$organizationId/upload': typeof AppOrganizationIdUploadRoute
   '/app/$organizationId/workflow': typeof AppOrganizationIdWorkflowRoute
   '/app/$organizationId/': typeof AppOrganizationIdIndexRoute
@@ -335,17 +289,12 @@ export interface FileRouteTypes {
     | '/api/auth/$'
     | '/api/google/callback'
     | '/app/$organizationId/agent'
-    | '/app/$organizationId/auth'
     | '/app/$organizationId/billing'
     | '/app/$organizationId/chat'
-    | '/app/$organizationId/d1'
-    | '/app/$organizationId/effect'
     | '/app/$organizationId/google'
     | '/app/$organizationId/inspector'
     | '/app/$organizationId/invitations'
     | '/app/$organizationId/members'
-    | '/app/$organizationId/repository'
-    | '/app/$organizationId/stripe'
     | '/app/$organizationId/upload'
     | '/app/$organizationId/workflow'
     | '/app/$organizationId/'
@@ -366,17 +315,12 @@ export interface FileRouteTypes {
     | '/api/auth/$'
     | '/api/google/callback'
     | '/app/$organizationId/agent'
-    | '/app/$organizationId/auth'
     | '/app/$organizationId/billing'
     | '/app/$organizationId/chat'
-    | '/app/$organizationId/d1'
-    | '/app/$organizationId/effect'
     | '/app/$organizationId/google'
     | '/app/$organizationId/inspector'
     | '/app/$organizationId/invitations'
     | '/app/$organizationId/members'
-    | '/app/$organizationId/repository'
-    | '/app/$organizationId/stripe'
     | '/app/$organizationId/upload'
     | '/app/$organizationId/workflow'
     | '/app/$organizationId'
@@ -401,17 +345,12 @@ export interface FileRouteTypes {
     | '/api/auth/$'
     | '/api/google/callback'
     | '/app/$organizationId/agent'
-    | '/app/$organizationId/auth'
     | '/app/$organizationId/billing'
     | '/app/$organizationId/chat'
-    | '/app/$organizationId/d1'
-    | '/app/$organizationId/effect'
     | '/app/$organizationId/google'
     | '/app/$organizationId/inspector'
     | '/app/$organizationId/invitations'
     | '/app/$organizationId/members'
-    | '/app/$organizationId/repository'
-    | '/app/$organizationId/stripe'
     | '/app/$organizationId/upload'
     | '/app/$organizationId/workflow'
     | '/app/$organizationId/'
@@ -552,20 +491,6 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AppOrganizationIdUploadRouteImport
       parentRoute: typeof AppOrganizationIdRoute
     }
-    '/app/$organizationId/stripe': {
-      id: '/app/$organizationId/stripe'
-      path: '/stripe'
-      fullPath: '/app/$organizationId/stripe'
-      preLoaderRoute: typeof AppOrganizationIdStripeRouteImport
-      parentRoute: typeof AppOrganizationIdRoute
-    }
-    '/app/$organizationId/repository': {
-      id: '/app/$organizationId/repository'
-      path: '/repository'
-      fullPath: '/app/$organizationId/repository'
-      preLoaderRoute: typeof AppOrganizationIdRepositoryRouteImport
-      parentRoute: typeof AppOrganizationIdRoute
-    }
     '/app/$organizationId/members': {
       id: '/app/$organizationId/members'
       path: '/members'
@@ -594,20 +519,6 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AppOrganizationIdGoogleRouteImport
       parentRoute: typeof AppOrganizationIdRoute
     }
-    '/app/$organizationId/effect': {
-      id: '/app/$organizationId/effect'
-      path: '/effect'
-      fullPath: '/app/$organizationId/effect'
-      preLoaderRoute: typeof AppOrganizationIdEffectRouteImport
-      parentRoute: typeof AppOrganizationIdRoute
-    }
-    '/app/$organizationId/d1': {
-      id: '/app/$organizationId/d1'
-      path: '/d1'
-      fullPath: '/app/$organizationId/d1'
-      preLoaderRoute: typeof AppOrganizationIdD1RouteImport
-      parentRoute: typeof AppOrganizationIdRoute
-    }
     '/app/$organizationId/chat': {
       id: '/app/$organizationId/chat'
       path: '/chat'
@@ -620,13 +531,6 @@ declare module '@tanstack/react-router' {
       path: '/billing'
       fullPath: '/app/$organizationId/billing'
       preLoaderRoute: typeof AppOrganizationIdBillingRouteImport
-      parentRoute: typeof AppOrganizationIdRoute
-    }
-    '/app/$organizationId/auth': {
-      id: '/app/$organizationId/auth'
-      path: '/auth'
-      fullPath: '/app/$organizationId/auth'
-      preLoaderRoute: typeof AppOrganizationIdAuthRouteImport
       parentRoute: typeof AppOrganizationIdRoute
     }
     '/app/$organizationId/agent': {
@@ -699,17 +603,12 @@ const AdminRouteWithChildren = AdminRoute._addFileChildren(AdminRouteChildren)
 
 interface AppOrganizationIdRouteChildren {
   AppOrganizationIdAgentRoute: typeof AppOrganizationIdAgentRoute
-  AppOrganizationIdAuthRoute: typeof AppOrganizationIdAuthRoute
   AppOrganizationIdBillingRoute: typeof AppOrganizationIdBillingRoute
   AppOrganizationIdChatRoute: typeof AppOrganizationIdChatRoute
-  AppOrganizationIdD1Route: typeof AppOrganizationIdD1Route
-  AppOrganizationIdEffectRoute: typeof AppOrganizationIdEffectRoute
   AppOrganizationIdGoogleRoute: typeof AppOrganizationIdGoogleRoute
   AppOrganizationIdInspectorRoute: typeof AppOrganizationIdInspectorRoute
   AppOrganizationIdInvitationsRoute: typeof AppOrganizationIdInvitationsRoute
   AppOrganizationIdMembersRoute: typeof AppOrganizationIdMembersRoute
-  AppOrganizationIdRepositoryRoute: typeof AppOrganizationIdRepositoryRoute
-  AppOrganizationIdStripeRoute: typeof AppOrganizationIdStripeRoute
   AppOrganizationIdUploadRoute: typeof AppOrganizationIdUploadRoute
   AppOrganizationIdWorkflowRoute: typeof AppOrganizationIdWorkflowRoute
   AppOrganizationIdIndexRoute: typeof AppOrganizationIdIndexRoute
@@ -717,17 +616,12 @@ interface AppOrganizationIdRouteChildren {
 
 const AppOrganizationIdRouteChildren: AppOrganizationIdRouteChildren = {
   AppOrganizationIdAgentRoute: AppOrganizationIdAgentRoute,
-  AppOrganizationIdAuthRoute: AppOrganizationIdAuthRoute,
   AppOrganizationIdBillingRoute: AppOrganizationIdBillingRoute,
   AppOrganizationIdChatRoute: AppOrganizationIdChatRoute,
-  AppOrganizationIdD1Route: AppOrganizationIdD1Route,
-  AppOrganizationIdEffectRoute: AppOrganizationIdEffectRoute,
   AppOrganizationIdGoogleRoute: AppOrganizationIdGoogleRoute,
   AppOrganizationIdInspectorRoute: AppOrganizationIdInspectorRoute,
   AppOrganizationIdInvitationsRoute: AppOrganizationIdInvitationsRoute,
   AppOrganizationIdMembersRoute: AppOrganizationIdMembersRoute,
-  AppOrganizationIdRepositoryRoute: AppOrganizationIdRepositoryRoute,
-  AppOrganizationIdStripeRoute: AppOrganizationIdStripeRoute,
   AppOrganizationIdUploadRoute: AppOrganizationIdUploadRoute,
   AppOrganizationIdWorkflowRoute: AppOrganizationIdWorkflowRoute,
   AppOrganizationIdIndexRoute: AppOrganizationIdIndexRoute,
