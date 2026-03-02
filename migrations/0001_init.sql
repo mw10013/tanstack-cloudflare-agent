@@ -166,7 +166,9 @@ create table Subscription (
   cancelAt text,
   canceledAt text,
   endedAt text,
-  seats integer
+  seats integer,
+  billingInterval text,
+  stripeScheduleId text
 );
 
 --> statement-breakpoint

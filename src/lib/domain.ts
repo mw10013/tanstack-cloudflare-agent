@@ -170,7 +170,12 @@ export const Subscription = Schema.Struct({
   periodStart: Schema.NullOr(isoDatetimeToDate),
   periodEnd: Schema.NullOr(isoDatetimeToDate),
   cancelAtPeriodEnd: intToBoolean,
+  cancelAt: Schema.NullOr(isoDatetimeToDate),
+  canceledAt: Schema.NullOr(isoDatetimeToDate),
+  endedAt: Schema.NullOr(isoDatetimeToDate),
   seats: Schema.NullOr(Schema.Int),
+  billingInterval: Schema.NullOr(Schema.String),
+  stripeScheduleId: Schema.NullOr(Schema.String),
   trialStart: Schema.NullOr(isoDatetimeToDate),
   trialEnd: Schema.NullOr(isoDatetimeToDate),
 });

@@ -8,7 +8,6 @@ import { createAuthMiddleware } from "better-auth/api";
 import { admin, magicLink, organization } from "better-auth/plugins";
 import { tanstackStartCookies } from "better-auth/tanstack-start";
 import { Cause, Config, Data, Effect, Layer, Redacted, ServiceMap } from "effect";
-import { d1Adapter } from "@/lib/d1-adapter";
 import { D1 } from "./D1";
 import { Stripe } from "./Stripe";
 import { CloudflareEnv } from "./effect-services";
@@ -35,7 +34,7 @@ const tryAuth = <A>(op: string, evaluate: () => Promise<A>) =>
   );
 
 interface CreateBetterAuthOptions {
-  db: D1Database | D1DatabaseSession;
+  db: D1Database;
   d1: D1["Service"];
   stripe: Stripe["Service"];
   kv: KVNamespace;
@@ -72,7 +71,7 @@ const createBetterAuthOptions = ({
     secret: Redacted.value(betterAuthSecret),
     telemetry: { enabled: false },
     rateLimit: { enabled: false },
-    database: d1Adapter(db),
+    database: db,
     user: { modelName: "User" },
     session: { modelName: "Session", storeSessionInDatabase: true },
     account: {
@@ -269,8 +268,7 @@ export class Auth extends ServiceMap.Service<Auth>()("Auth", {
       transactionalEmail: Config.nonEmptyString("TRANSACTIONAL_EMAIL"),
       stripeWebhookSecret: Config.redacted("STRIPE_WEBHOOK_SECRET"),
     });
-    const { KV } = yield* CloudflareEnv;
-    const db = { prepare: d1.prepare } as D1Database;
+    const { KV, D1: db } = yield* CloudflareEnv;
 
     const auth = betterAuth(
       createBetterAuthOptions({
@@ -284,13 +282,22 @@ export class Auth extends ServiceMap.Service<Auth>()("Auth", {
         stripeWebhookSecret: authConfig.stripeWebhookSecret,
         databaseHookUserCreateAfter: async (user) => {
           if (user.role === "user") {
-            await auth.api.createOrganization({
+            const org = await auth.api.createOrganization({
               body: {
                 name: `${user.email.charAt(0).toUpperCase() + user.email.slice(1)}'s Organization`,
                 slug: user.email.replace(/[^a-z0-9]/g, "-").toLowerCase(),
                 userId: user.id,
               },
             });
+            await Effect.runPromise(
+              d1.run(
+                d1
+                  .prepare(
+                    "update Session set activeOrganizationId = ? where userId = ? and activeOrganizationId is null",
+                  )
+                  .bind(org.id, user.id),
+              ),
+            );
           }
         },
         databaseHookSessionCreateBefore: async (session) => {
