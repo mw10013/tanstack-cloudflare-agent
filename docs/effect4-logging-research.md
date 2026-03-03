@@ -173,6 +173,44 @@ Constraint from annotation:
 
 - Every `console.*` call in `src/lib/Auth.ts` must move under `runEffect(...)`
 
+### Phase 0: Bootstrap logging in `makeRunEffect` (`src/worker.ts`)
+
+Yes, this is required for app-wide consistency.
+
+Why:
+
+- `makeRunEffect` is the runtime choke point: `Effect.runPromiseExit(Effect.provide(effect, appLayer))` (`src/worker.ts:67`)
+- Every Auth call path uses this runner (`src/worker.ts:122`, `src/worker.ts:183`)
+- No explicit logger layer is configured in `src/` yet (`rg "Logger.layer|MinimumLogLevel" src` => none)
+
+Effect implication:
+
+- `Effect.log*` will work with defaults, but format/level policy is uncontrolled
+- to enforce JSON vs pretty and minimum level, provide logger + `References.MinimumLogLevel` in `makeRunEffect`
+
+Grounding:
+
+- Default logger set contains `defaultLogger` and `tracerLogger` (`refs/effect4/packages/effect/src/internal/effect.ts:5839`)
+- Logger override/merge behavior is controlled by `Logger.layer(..., { mergeWithExisting })` (`refs/effect4/packages/effect/src/Logger.ts:1113-1117`)
+- Minimum threshold controlled by `References.MinimumLogLevel` (`refs/effect4/packages/effect/src/References.ts:460-461`)
+
+Suggested bootstrap shape:
+
+```ts
+const loggerLayer =
+  env.ENVIRONMENT === "production"
+    ? Layer.merge(
+        Logger.layer([Logger.consoleJson, Logger.tracerLogger], { mergeWithExisting: false }),
+        Layer.succeed(References.MinimumLogLevel, "Info")
+      )
+    : Layer.merge(
+        Logger.layer([Logger.consolePretty(), Logger.tracerLogger], { mergeWithExisting: false }),
+        Layer.succeed(References.MinimumLogLevel, "Debug")
+      )
+```
+
+Then compose this into the layer passed to `Effect.provide(..., layer)` inside `makeRunEffect`.
+
 Current inventory:
 
 - `22` `console.*` call sites in `src/lib/Auth.ts`
