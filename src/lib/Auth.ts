@@ -26,6 +26,17 @@ const toCause = (error: unknown) =>
       ? error
       : new Error(String(error));
 
+const toId = (value: unknown): string =>
+  typeof value === "object" && value !== null && "id" in value
+    ? String(value.id)
+    : "unknown";
+
+const toNestedId = (value: unknown, key: string): string => {
+  if (typeof value !== "object" || value === null) return "unknown";
+  const record = value as Record<string, unknown>;
+  return key in record ? toId(record[key]) : "unknown";
+};
+
 const tryAuth = <A>(op: string, evaluate: () => Promise<A>) =>
   Effect.tryPromise(evaluate).pipe(
     Effect.mapError((error) => {
@@ -90,20 +101,29 @@ const createBetterAuthOptions = ({
         create: {
           after:
             databaseHookUserCreateAfter ??
-            ((user) => {
-              console.log("databaseHooks.user.create.after", user);
-              return Promise.resolve();
-            }),
+            ((user) =>
+              runEffect(
+                Effect.logDebug("databaseHooks.user.create.after", {
+                  userId: user.id,
+                }).pipe(
+                  Effect.annotateLogs({ hook: "databaseHooks.user.create.after" }),
+                ),
+              )),
         },
       },
       session: {
         create: {
           before:
             databaseHookSessionCreateBefore ??
-            ((session) => {
-              console.log("databaseHooks.session.create.before", session);
-              return Promise.resolve();
-            }),
+            ((session) =>
+              runEffect(
+                Effect.logDebug("databaseHooks.session.create.before", {
+                  sessionId: session.id,
+                  userId: session.userId,
+                }).pipe(
+                  Effect.annotateLogs({ hook: "databaseHooks.session.create.before" }),
+                ),
+              )),
         },
       },
     },
@@ -116,29 +136,48 @@ const createBetterAuthOptions = ({
               ctx.path === "/subscription/billing-portal" ||
               ctx.path === "/subscription/cancel-subscription"
             ) {
-              yield* Effect.sync(() => {
-                console.log(`better-auth: hooks: before: ${ctx.path}`);
+              yield* Effect.logInfo("hooks.before.ensureBillingPortalConfiguration", {
+                path: ctx.path,
               });
               const stripe = yield* Stripe;
               yield* stripe.ensureBillingPortalConfiguration();
             }
-          }),
+          }).pipe(
+            Effect.annotateLogs({
+              hook: "hooks.before",
+              path: ctx.path,
+            }),
+          ),
         ),
       ),
     },
     plugins: [
       magicLink({
         storeToken: "hashed",
-        sendMagicLink: async (data) => {
-          console.log("sendMagicLink", data);
-          await kv.put("demo:magicLink", data.url, {
-            expirationTtl: 60,
-          });
-          console.log(`Email would be sent to: ${data.email}`);
-          console.log(`Subject: Your Magic Link`);
-          console.log(`From: ${transactionalEmail}`);
-          console.log(`Magic link URL: ${data.url}`);
-        },
+        sendMagicLink: (data) =>
+          runEffect(
+            Effect.gen(function* () {
+              yield* Effect.logInfo("sendMagicLink", {
+                email: data.email,
+                url: data.url,
+              });
+              yield* Effect.tryPromise(() =>
+                kv.put("demo:magicLink", data.url, {
+                  expirationTtl: 60,
+                }),
+              );
+              yield* Effect.logInfo("magicLink.email.simulation", {
+                to: data.email,
+                subject: "Your Magic Link",
+                from: transactionalEmail,
+              });
+            }).pipe(
+              Effect.annotateLogs({
+                hook: "magicLink.sendMagicLink",
+                email: data.email,
+              }),
+            ),
+          ),
       }),
       admin(),
       organization({
@@ -150,14 +189,20 @@ const createBetterAuthOptions = ({
           member: { modelName: "Member" },
           invitation: { modelName: "Invitation" },
         },
-        sendInvitationEmail: (data) => {
-          const url = `${betterAuthUrl}/accept-invitation/${data.id}`;
-          console.log(`Invitation email would be sent to: ${data.email}`);
-          console.log(`Subject: You're invited!`);
-          console.log(`From: ${transactionalEmail}`);
-          console.log(`Invitation URL: ${url}`);
-          return Promise.resolve();
-        },
+        sendInvitationEmail: (data) =>
+          runEffect(
+            Effect.logInfo("organization.invitation.email.simulation", {
+              email: data.email,
+              from: transactionalEmail,
+              subject: "You're invited!",
+              url: `${betterAuthUrl}/accept-invitation/${data.id}`,
+            }).pipe(
+              Effect.annotateLogs({
+                hook: "organization.sendInvitationEmail",
+                invitationId: data.id,
+              }),
+            ),
+          ),
       }),
       stripePlugin({
         stripeClient: stripeClient,
@@ -176,27 +221,50 @@ const createBetterAuthOptions = ({
                   annualDiscountPriceId: plan.annualPriceId,
                   freeTrial: {
                     days: plan.freeTrialDays,
-                    onTrialStart: (subscription) => {
-                      console.log(
-                        `stripe plugin: onTrialStart: ${plan.name} plan trial started for subscription ${subscription.id}`,
-                      );
-                      return Promise.resolve();
-                    },
-                    onTrialEnd: ({ subscription }) => {
-                      console.log(
-                        `stripe plugin: onTrialEnd: ${plan.name} plan trial ended for subscription ${subscription.id}`,
-                      );
-                      return Promise.resolve();
-                    },
-                    onTrialExpired: (subscription) => {
-                      console.log(
-                        `stripe plugin: onTrialExpired: ${plan.name} plan trial expired for subscription ${subscription.id}`,
-                      );
-                      return Promise.resolve();
-                    },
+                    onTrialStart: (subscription: unknown) =>
+                      runEffect(
+                        Effect.logInfo("stripe.subscription.onTrialStart", {
+                          planName: plan.name,
+                          subscriptionId: toId(subscription),
+                        }).pipe(
+                          Effect.annotateLogs({
+                            hook: "stripe.subscription.onTrialStart",
+                            planName: plan.name,
+                            subscriptionId: toId(subscription),
+                          }),
+                        ),
+                      ),
+                    onTrialEnd: (payload: unknown) =>
+                      runEffect(
+                        Effect.logInfo("stripe.subscription.onTrialEnd", {
+                          planName: plan.name,
+                          subscriptionId: toNestedId(payload, "subscription"),
+                        }).pipe(
+                          Effect.annotateLogs({
+                            hook: "stripe.subscription.onTrialEnd",
+                            planName: plan.name,
+                            subscriptionId: toNestedId(payload, "subscription"),
+                          }),
+                        ),
+                      ),
+                    onTrialExpired: (subscription: unknown) =>
+                      runEffect(
+                        Effect.logInfo("stripe.subscription.onTrialExpired", {
+                          planName: plan.name,
+                          subscriptionId: toId(subscription),
+                        }).pipe(
+                          Effect.annotateLogs({
+                            hook: "stripe.subscription.onTrialExpired",
+                            planName: plan.name,
+                            subscriptionId: toId(subscription),
+                          }),
+                        ),
+                      ),
                   },
                 }));
-              }),
+              }).pipe(
+                Effect.annotateLogs({ hook: "stripe.subscription.plans" }),
+              ),
             ),
           authorizeReference: ({ user, referenceId, action }) =>
             runEffect(
@@ -211,38 +279,68 @@ const createBetterAuthOptions = ({
                       .bind(user.id, referenceId),
                   ),
                 );
-                yield* Effect.sync(() => {
-                  console.log(
-                    `stripe plugin: authorizeReference: user ${user.id} is attempting to ${action} subscription for referenceId ${referenceId}, authorized: ${String(result)}`,
-                  );
+                yield* Effect.logDebug("stripe.subscription.authorizeReference", {
+                  userId: user.id,
+                  referenceId,
+                  action,
+                  authorized: result,
                 });
                 return result;
-              }),
+              }).pipe(
+                Effect.annotateLogs({
+                  hook: "stripe.subscription.authorizeReference",
+                  userId: user.id,
+                  referenceId,
+                  action,
+                }),
+              ),
             ),
-          onSubscriptionComplete: ({ subscription, plan }) => {
-            console.log(
-              `stripe plugin: onSubscriptionComplete: subscription ${subscription.id} completed for plan ${plan.name}`,
-            );
-            return Promise.resolve();
-          },
-          onSubscriptionUpdate: ({ subscription }) => {
-            console.log(
-              `stripe plugin: onSubscriptionUpdate: subscription ${subscription.id} updated`,
-            );
-            return Promise.resolve();
-          },
-          onSubscriptionCancel: ({ subscription }) => {
-            console.log(
-              `stripe plugin: onSubscriptionCancel: subscription ${subscription.id} canceled`,
-            );
-            return Promise.resolve();
-          },
-          onSubscriptionDeleted: ({ subscription }) => {
-            console.log(
-              `stripe plugin: onSubscriptionDeleted: subscription ${subscription.id} deleted`,
-            );
-            return Promise.resolve();
-          },
+          onSubscriptionComplete: ({ subscription, plan }) =>
+            runEffect(
+              Effect.logInfo("stripe.subscription.onSubscriptionComplete", {
+                subscriptionId: subscription.id,
+                planName: plan.name,
+              }).pipe(
+                Effect.annotateLogs({
+                  hook: "stripe.subscription.onSubscriptionComplete",
+                  subscriptionId: subscription.id,
+                  planName: plan.name,
+                }),
+              ),
+            ),
+          onSubscriptionUpdate: ({ subscription }) =>
+            runEffect(
+              Effect.logInfo("stripe.subscription.onSubscriptionUpdate", {
+                subscriptionId: subscription.id,
+              }).pipe(
+                Effect.annotateLogs({
+                  hook: "stripe.subscription.onSubscriptionUpdate",
+                  subscriptionId: subscription.id,
+                }),
+              ),
+            ),
+          onSubscriptionCancel: ({ subscription }) =>
+            runEffect(
+              Effect.logInfo("stripe.subscription.onSubscriptionCancel", {
+                subscriptionId: subscription.id,
+              }).pipe(
+                Effect.annotateLogs({
+                  hook: "stripe.subscription.onSubscriptionCancel",
+                  subscriptionId: subscription.id,
+                }),
+              ),
+            ),
+          onSubscriptionDeleted: ({ subscription }) =>
+            runEffect(
+              Effect.logInfo("stripe.subscription.onSubscriptionDeleted", {
+                subscriptionId: subscription.id,
+              }).pipe(
+                Effect.annotateLogs({
+                  hook: "stripe.subscription.onSubscriptionDeleted",
+                  subscriptionId: subscription.id,
+                }),
+              ),
+            ),
         },
         organization: {
           enabled: true,
@@ -256,18 +354,28 @@ const createBetterAuthOptions = ({
             modelName: "Subscription",
           },
         },
-        onCustomerCreate: ({ stripeCustomer, user }) => {
-          console.log(
-            `stripe plugin: onCustomerCreate: customer ${stripeCustomer.id} created for user ${user.email}`,
-          );
-          return Promise.resolve();
-        },
-        onEvent: (event) => {
-          console.log(
-            `stripe plugin: onEvent: stripe event received: ${event.type}`,
-          );
-          return Promise.resolve();
-        },
+        onCustomerCreate: ({ stripeCustomer, user }) =>
+          runEffect(
+            Effect.logInfo("stripe.onCustomerCreate", {
+              stripeCustomerId: stripeCustomer.id,
+              userEmail: user.email,
+            }).pipe(
+              Effect.annotateLogs({
+                hook: "stripe.onCustomerCreate",
+                stripeCustomerId: stripeCustomer.id,
+                userEmail: user.email,
+              }),
+            ),
+          ),
+        onEvent: (event) =>
+          runEffect(
+            Effect.logInfo("stripe.onEvent", { type: event.type }).pipe(
+              Effect.annotateLogs({
+                hook: "stripe.onEvent",
+                eventType: event.type,
+              }),
+            ),
+          ),
       }),
       tanstackStartCookies(),
     ],
@@ -280,7 +388,9 @@ type BetterAuthInstance = ReturnType<
 export class Auth extends ServiceMap.Service<Auth>()("Auth", {
   make: Effect.gen(function* () {
     const services = yield* Effect.services<D1 | Stripe>();
-    const runEffect = Effect.runPromiseWith(services);
+    const runEffectBase = Effect.runPromiseWith(services);
+    const runEffect = <A, E>(effect: Effect.Effect<A, E, D1 | Stripe>) =>
+      runEffectBase(effect.pipe(Effect.annotateLogs({ service: "Auth" })));
     const stripe = yield* Stripe;
     const authConfig = yield* Config.all({
       betterAuthUrl: Config.nonEmptyString("BETTER_AUTH_URL"),
@@ -304,6 +414,10 @@ export class Auth extends ServiceMap.Service<Auth>()("Auth", {
           runEffect(
             Effect.gen(function* () {
               if (user.role !== "user") return;
+              yield* Effect.logInfo("databaseHooks.user.create.after", {
+                userId: user.id,
+                role: user.role,
+              });
               const d1 = yield* D1;
               const org = yield* Effect.tryPromise(() =>
                 auth.api.createOrganization({
@@ -314,6 +428,10 @@ export class Auth extends ServiceMap.Service<Auth>()("Auth", {
                   },
                 }),
               );
+              yield* Effect.logInfo("auth.organization.created", {
+                userId: user.id,
+                organizationId: org.id,
+              });
               yield* d1.run(
                 d1
                   .prepare(
@@ -321,11 +439,21 @@ export class Auth extends ServiceMap.Service<Auth>()("Auth", {
                   )
                   .bind(org.id, user.id),
               );
-            }),
+            }).pipe(
+              Effect.withLogSpan("auth.user.create.after"),
+              Effect.annotateLogs({
+                hook: "databaseHooks.user.create.after",
+                userId: user.id,
+              }),
+            ),
           ),
         databaseHookSessionCreateBefore: (session) =>
           runEffect(
             Effect.gen(function* () {
+              yield* Effect.logDebug("databaseHooks.session.create.before", {
+                sessionId: session.id,
+                userId: session.userId,
+              });
               const d1 = yield* D1;
               const activeOrganization = yield* d1.first<{ id: string }>(
                 d1
@@ -340,7 +468,14 @@ export class Auth extends ServiceMap.Service<Auth>()("Auth", {
                   activeOrganizationId: activeOrganization?.id ?? undefined,
                 },
               };
-            }),
+            }).pipe(
+              Effect.withLogSpan("auth.session.create"),
+              Effect.annotateLogs({
+                hook: "databaseHooks.session.create.before",
+                sessionId: session.id,
+                userId: session.userId,
+              }),
+            ),
           ),
       }),
     );
@@ -348,9 +483,28 @@ export class Auth extends ServiceMap.Service<Auth>()("Auth", {
     return {
       auth,
       api: auth.api,
-      handler: (request: Request) => tryAuth("Auth.handler", () => auth.handler(request)),
+      handler: (request: Request) =>
+        tryAuth(
+          "Auth.handler",
+          () =>
+            runEffect(
+              Effect.tryPromise(() => auth.handler(request)).pipe(
+                Effect.withLogSpan("auth.handler"),
+                Effect.annotateLogs({ op: "Auth.handler" }),
+              ),
+            ),
+        ),
       getSession: (headers: Headers) =>
-        tryAuth("Auth.api.getSession", () => auth.api.getSession({ headers })),
+        tryAuth(
+          "Auth.api.getSession",
+          () =>
+            runEffect(
+              Effect.tryPromise(() => auth.api.getSession({ headers })).pipe(
+                Effect.withLogSpan("auth.getSession"),
+                Effect.annotateLogs({ op: "Auth.api.getSession" }),
+              ),
+            ),
+        ),
     };
   }),
 }) {

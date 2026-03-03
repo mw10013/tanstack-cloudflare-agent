@@ -1,7 +1,7 @@
 import serverEntry from "@tanstack/react-start/server-entry";
 import { isNotFound, isRedirect } from "@tanstack/react-router";
 import { getAgentByName, routeAgentRequest } from "agents";
-import { Cause, ConfigProvider, Effect, Layer, ServiceMap } from "effect";
+import { Cause, ConfigProvider, Effect, Layer, Logger, References, ServiceMap } from "effect";
 import * as Exit from "effect/Exit";
 import * as Schema from "effect/Schema";
 import { Auth, type AuthTypes } from "@/lib/Auth";
@@ -61,10 +61,23 @@ const makeRunEffect = (env: Env) => {
   const repositoryLayer = Layer.provideMerge(Repository.layer, d1Layer);
   const stripeLayer = Layer.provideMerge(Stripe.layer, repositoryLayer);
   const appLayer = Layer.provideMerge(Auth.layer, stripeLayer);
+  const loggerLayer = Layer.merge(
+    Logger.layer(
+      env.ENVIRONMENT === "production"
+        ? [Logger.consoleJson, Logger.tracerLogger]
+        : [Logger.consolePretty(), Logger.tracerLogger],
+      { mergeWithExisting: false },
+    ),
+    Layer.succeed(
+      References.MinimumLogLevel,
+      env.ENVIRONMENT === "production" ? "Info" : "Debug",
+    ),
+  );
+  const runtimeLayer = Layer.merge(appLayer, loggerLayer);
   return async <A, E>(
     effect: Effect.Effect<A, E, Layer.Success<typeof appLayer>>,
   ): Promise<A> => {
-    const exit = await Effect.runPromiseExit(Effect.provide(effect, appLayer));
+    const exit = await Effect.runPromiseExit(Effect.provide(effect, runtimeLayer));
     if (Exit.isSuccess(exit)) return exit.value;
     const squashed = Cause.squash(exit.cause);
     // eslint-disable-next-line @typescript-eslint/only-throw-error -- redirect is a Response, notFound is a plain object; TanStack expects these thrown as-is
