@@ -174,3 +174,6 @@ Notes:
 3. Add per-operation annotations (`hook`, `userId`, `sessionId`)
 4. Add `withLogSpan` around high-value paths (`auth.handler`, `auth.session.create`)
 5. Configure production logger layer (`consoleJson` + `tracerLogger`) and minimum level
+
+Put together a plan focusing on adding logging to Auth.ts
+Any code using console should be put into runEffect.
