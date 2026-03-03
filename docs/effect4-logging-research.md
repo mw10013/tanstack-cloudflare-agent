@@ -42,6 +42,8 @@ Effect.withLogSpan("checkout")
 Effect.annotateLogsScoped({ requestId: "req-123" })
 ```
 
+Does annotateLogs impact nested effects or is that what annotateLogsScoped is for? Need examples with output.
+
 ### Logger Formats (Built-in)
 
 | Logger | Output | Use Case |
@@ -57,6 +59,10 @@ Effect.annotateLogsScoped({ requestId: "req-123" })
 | `Logger.consoleStructured` | Structured object to console | Dev debugging |
 | `Logger.tracerLogger` | Logs as tracer span events | Distributed tracing |
 
+
+Need a view on which formats would be good for cloudflare production and why.
+Not understanding the distinction between format vs console vs tracer
+
 Source: `refs/effect4/packages/effect/src/Logger.ts`
 
 ### Configuring Loggers via Layer
@@ -71,6 +77,8 @@ const AdditionalLoggerLive = Logger.layer([Logger.consoleJson], { mergeWithExist
 // Multiple loggers simultaneously
 const MultiLoggerLive = Logger.layer([Logger.consoleJson, Logger.consolePretty()])
 ```
+
+What do merge and multiple even mean?
 
 ### Log Level Filtering
 
@@ -114,6 +122,8 @@ const LoggerLayer = Layer.unwrap(Effect.gen(function*() {
 }))
 ```
 
+Why is unwrap needed? Is it because it takes an effect that returns a Layer and need to take the layer out of the effect? Explain the concept of unwrap in functional programming context.
+
 Source: `refs/effect4/ai-docs/src/08_observability/10_logging.ts`
 
 ### Full Example: Annotated Logging
@@ -145,6 +155,8 @@ const effectFunction = Effect.fn("effectFunction")(
 )
 ```
 
+What is a tracing span? How does it combine with annotateLogs and affect output?
+
 ---
 
 ## 2. Console Module
@@ -164,6 +176,8 @@ const program = Effect.gen(function*() {
 })
 ```
 
+When would you use Console instead of logging?
+
 ### Console.withGroup — Scoped Grouping
 
 ```ts
@@ -175,6 +189,8 @@ Console.withGroup(
   { label: "Processing Steps", collapsed: false }
 )
 ```
+
+How does this impact output?
 
 ### Console.withTime — Scoped Timing
 
@@ -275,6 +291,8 @@ sendMagicLink: async (data) =>
   ),
 ```
 
+NO FUCKING await in an effect.
+
 **B. Keep `console.log` in simple fire-and-forget callbacks** where bridging adds too much ceremony (e.g., `onSubscriptionComplete`, `onEvent`). These could use the `Console` module if inside Effect context.
 
 #### 6. Configure Logger Layer in Service Construction
@@ -306,3 +324,5 @@ const AuthLoggerLayer = Logger.layer([Logger.consoleJson])
 ### Key Constraint
 
 Many better-auth plugin callbacks are plain functions returning `Promise<void>`, not Effect. To use Effect logging in these, you must bridge via `runEffect(Effect.logInfo(...))`. For simple one-liner logs, the ceremony may not be worth it. Prioritize converting the callbacks that already use `runEffect` (like `authorizeReference`, `plans`, hooks.before).
+
+We would want to convert these over to effect.
