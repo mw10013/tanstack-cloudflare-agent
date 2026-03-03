@@ -167,13 +167,106 @@ Notes:
 - Explicitly keep `Logger.tracerLogger` when replacing logger set
 - Add `Layer.succeed(References.MinimumLogLevel, "Warn")` in production if needed
 
-## Migration Priority For This Repo
+## `Auth.ts` Logging Plan (RunEffect-First)
 
-1. Convert callback areas already using `runEffect` to `Effect.log*` + `Effect.tryPromise`
-2. Add `Effect.annotateLogs({ service: "Auth" })` at boundary level
-3. Add per-operation annotations (`hook`, `userId`, `sessionId`)
-4. Add `withLogSpan` around high-value paths (`auth.handler`, `auth.session.create`)
-5. Configure production logger layer (`consoleJson` + `tracerLogger`) and minimum level
+Constraint from annotation:
 
-Put together a plan focusing on adding logging to Auth.ts
-Any code using console should be put into runEffect.
+- Every `console.*` call in `src/lib/Auth.ts` must move under `runEffect(...)`
+
+Current inventory:
+
+- `22` `console.*` call sites in `src/lib/Auth.ts`
+
+Grounding:
+
+- Existing `runEffect` bridge already exists: `const runEffect = Effect.runPromiseWith(services)` (`src/lib/Auth.ts:283`)
+- Logger fan-out and level filtering behavior in runtime (`refs/effect4/packages/effect/src/internal/effect.ts:5962-5966`, `refs/effect4/packages/effect/src/References.ts:460-461`)
+
+### Phase 1: Add a single auth logging boundary
+
+Add one reusable helper inside `createBetterAuthOptions`:
+
+- Wrap effects with `Effect.annotateLogs({ service: "Auth", module: "better-auth" })`
+- Keep callback shape by returning `runEffect(...)`
+
+Result:
+
+- every callback migration is mechanical
+- shared metadata on all Auth logs
+
+### Phase 2: Migrate callback groups in order
+
+1. Hooks and database hooks
+2. Magic link + invitation email callbacks
+3. Stripe plugin callbacks
+
+Call sites:
+
+1. Database hook defaults
+   - `databaseHooks.user.create.after` (`src/lib/Auth.ts:94`)
+   - `databaseHooks.session.create.before` (`src/lib/Auth.ts:104`)
+2. Existing runEffect branch using `Effect.sync(() => console.log(...))`
+   - `hooks.before` (`src/lib/Auth.ts:119-121`)
+   - `authorizeReference` (`src/lib/Auth.ts:214-218`)
+3. Async callbacks with raw console + Promise APIs
+   - `sendMagicLink` (`src/lib/Auth.ts:132-141`)
+   - `sendInvitationEmail` (`src/lib/Auth.ts:153-160`)
+4. Stripe lifecycle callbacks returning `Promise.resolve()`
+   - `onTrialStart` (`src/lib/Auth.ts:180-183`)
+   - `onTrialEnd` (`src/lib/Auth.ts:186-189`)
+   - `onTrialExpired` (`src/lib/Auth.ts:192-195`)
+   - `onSubscriptionComplete` (`src/lib/Auth.ts:223-226`)
+   - `onSubscriptionUpdate` (`src/lib/Auth.ts:229-232`)
+   - `onSubscriptionCancel` (`src/lib/Auth.ts:235-238`)
+   - `onSubscriptionDeleted` (`src/lib/Auth.ts:241-244`)
+   - `onCustomerCreate` (`src/lib/Auth.ts:260-263`)
+   - `onEvent` (`src/lib/Auth.ts:266-269`)
+
+### Phase 3: Use this conversion pattern everywhere
+
+Pattern A: pure log callback
+
+```ts
+onSubscriptionUpdate: ({ subscription }) =>
+  runEffect(
+    Effect.logInfo("stripe plugin: onSubscriptionUpdate", { subscriptionId: subscription.id }).pipe(
+      Effect.annotateLogs({ hook: "stripe.onSubscriptionUpdate" })
+    )
+  )
+```
+
+Pattern B: log + Promise side effect
+
+```ts
+sendMagicLink: (data) =>
+  runEffect(
+    Effect.gen(function*() {
+      yield* Effect.logInfo("sendMagicLink", { email: data.email })
+      yield* Effect.tryPromise(() => kv.put("demo:magicLink", data.url, { expirationTtl: 60 }))
+    }).pipe(
+      Effect.annotateLogs({ hook: "magicLink.sendMagicLink" })
+    )
+  )
+```
+
+Grounding:
+
+- `Effect.tryPromise` for Promise APIs (`refs/effect4/ai-docs/src/01_effect/01_basics/10_creating-effects.ts:45-56`)
+
+### Phase 4: Log level and annotation policy
+
+1. `Debug`: noisy internal hooks (`databaseHooks.*`, authorize checks)
+2. `Info`: product events (magic link, invite email, subscription lifecycle)
+3. `Warning`: unexpected but non-fatal states
+4. `Error`: caught failures before rethrow / propagation
+
+Always attach stable keys:
+
+- `service`, `hook`, `userId`, `subscriptionId`, `organizationId`, `path`
+
+### Phase 5: Verification checklist
+
+1. `rg -n "console\\." src/lib/Auth.ts` returns `0`
+2. `pnpm typecheck`
+3. `pnpm lint`
+4. Exercise sign-in / invite / subscription flows and verify structured log output
