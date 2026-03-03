@@ -7,8 +7,7 @@ export class Repository extends ServiceMap.Service<Repository>()("Repository", {
   make: Effect.gen(function* () {
     const d1 = yield* D1;
     return {
-      getUser: (email: Domain.User["email"]) =>
-        Effect.gen(function* () {
+      getUser: Effect.fn("Repository.getUser")(function* (email: Domain.User["email"]) {
           const result = yield* d1.first(
             d1.prepare(`select * from User where email = ?1`).bind(email),
           );
@@ -19,7 +18,7 @@ export class Repository extends ServiceMap.Service<Repository>()("Repository", {
           );
         }),
 
-      getUsers: ({
+      getUsers: Effect.fn("Repository.getUsers")(function* ({
         limit,
         offset,
         searchValue,
@@ -27,8 +26,7 @@ export class Repository extends ServiceMap.Service<Repository>()("Repository", {
         limit: number;
         offset: number;
         searchValue?: string;
-      }) =>
-        Effect.gen(function* () {
+      }) {
           const searchPattern = searchValue ? `%${searchValue}%` : "%";
           const result = yield* d1.first(
             d1
@@ -80,14 +78,13 @@ select json_object(
           )(result);
         }),
 
-      getAppDashboardData: ({
+      getAppDashboardData: Effect.fn("Repository.getAppDashboardData")(function* ({
         userEmail,
         organizationId,
       }: {
         userEmail: string;
         organizationId: string;
-      }) =>
-        Effect.gen(function* () {
+      }) {
           const result = yield* d1.first(
             d1
               .prepare(
@@ -156,8 +153,7 @@ select json_object(
           )(result);
         }),
 
-      getAdminDashboardData: () =>
-        Effect.gen(function* () {
+      getAdminDashboardData: Effect.fn("Repository.getAdminDashboardData")(function* () {
           const result = yield* d1.first(
             d1.prepare(
               `
@@ -186,7 +182,7 @@ select json_object(
           )(result);
         }),
 
-      getCustomers: ({
+      getCustomers: Effect.fn("Repository.getCustomers")(function* ({
         limit,
         offset,
         searchValue,
@@ -194,8 +190,7 @@ select json_object(
         limit: number;
         offset: number;
         searchValue?: string;
-      }) =>
-        Effect.gen(function* () {
+      }) {
           const searchPattern = searchValue ? `%${searchValue}%` : "%";
           const result = yield* d1.first(
             d1
@@ -269,7 +264,7 @@ select json_object(
           )(result);
         }),
 
-      getSubscriptions: ({
+      getSubscriptions: Effect.fn("Repository.getSubscriptions")(function* ({
         limit,
         offset,
         searchValue,
@@ -277,8 +272,7 @@ select json_object(
         limit: number;
         offset: number;
         searchValue?: string;
-      }) =>
-        Effect.gen(function* () {
+      }) {
           const searchPattern = searchValue ? `%${searchValue}%` : "%";
           const result = yield* d1.first(
             d1
@@ -383,7 +377,7 @@ select json_object(
           )(result);
         }),
 
-      getSessions: ({
+      getSessions: Effect.fn("Repository.getSessions")(function* ({
         limit,
         offset,
         searchValue,
@@ -391,8 +385,7 @@ select json_object(
         limit: number;
         offset: number;
         searchValue?: string;
-      }) =>
-        Effect.gen(function* () {
+      }) {
           const searchPattern = searchValue ? `%${searchValue}%` : "%";
           const result = yield* d1.first(
             d1

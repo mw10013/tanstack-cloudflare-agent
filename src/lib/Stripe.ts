@@ -50,8 +50,7 @@ export class Stripe extends ServiceMap.Service<Stripe>()("Stripe", {
       apiVersion: "2025-10-29.clover",
     });
 
-    const getPrices = () =>
-      Effect.gen(function* () {
+    const getPrices = Effect.fn("Stripe.getPrices")(function* () {
         const lookupKeys = planData.flatMap((plan) => [
           plan.monthlyPriceLookupKey,
           plan.annualPriceLookupKey,
@@ -109,8 +108,7 @@ export class Stripe extends ServiceMap.Service<Stripe>()("Stripe", {
         return prices;
       });
 
-    const getPlans = () =>
-      Effect.gen(function* () {
+    const getPlans = Effect.fn("Stripe.getPlans")(function* () {
         const key = "stripe:plans";
         const cachedPlans = yield* tryStripe("KV.get(stripe:plans)", () =>
           KV.get(key, { type: "json" }),
@@ -175,8 +173,7 @@ export class Stripe extends ServiceMap.Service<Stripe>()("Stripe", {
         return plans as readonly Plan[];
       });
 
-    const ensureBillingPortalConfiguration = () =>
-      Effect.gen(function* () {
+    const ensureBillingPortalConfiguration = Effect.fn("Stripe.ensureBillingPortalConfiguration")(function* () {
         const key = "stripe:isBillingPortalConfigured";
         const isConfigured = yield* tryStripe(
           "KV.get(stripe:isBillingPortalConfigured)",
