@@ -7,6 +7,7 @@ import { betterAuth } from "better-auth";
 import { createAuthMiddleware } from "better-auth/api";
 import { admin, magicLink, organization } from "better-auth/plugins";
 import { tanstackStartCookies } from "better-auth/tanstack-start";
+import type { Stripe as StripeTypes } from "stripe";
 import { Cause, Config, Data, Effect, Layer, Redacted, ServiceMap } from "effect";
 import { D1 } from "./D1";
 import { Stripe } from "./Stripe";
@@ -35,9 +36,8 @@ const tryAuth = <A>(op: string, evaluate: () => Promise<A>) =>
 
 interface CreateBetterAuthOptions {
   db: D1Database;
-  d1: D1["Service"];
-  stripe: Stripe["Service"];
-  runEffect: <A, E>(effect: Effect.Effect<A, E>) => Promise<A>;
+  stripeClient: StripeTypes;
+  runEffect: <A, E>(effect: Effect.Effect<A, E, D1 | Stripe>) => Promise<A>;
   kv: KVNamespace;
   betterAuthUrl: string;
   betterAuthSecret: Redacted.Redacted;
@@ -57,8 +57,7 @@ interface CreateBetterAuthOptions {
 
 const createBetterAuthOptions = ({
   db,
-  d1,
-  stripe,
+  stripeClient,
   runEffect,
   kv,
   betterAuthUrl,
@@ -120,6 +119,7 @@ const createBetterAuthOptions = ({
               yield* Effect.sync(() => {
                 console.log(`better-auth: hooks: before: ${ctx.path}`);
               });
+              const stripe = yield* Stripe;
               yield* stripe.ensureBillingPortalConfiguration();
             }
           }),
@@ -160,7 +160,7 @@ const createBetterAuthOptions = ({
         },
       }),
       stripePlugin({
-        stripeClient: stripe.stripe,
+        stripeClient: stripeClient,
         stripeWebhookSecret: Redacted.value(stripeWebhookSecret),
         createCustomerOnSignUp: false,
         subscription: {
@@ -168,8 +168,9 @@ const createBetterAuthOptions = ({
           requireEmailVerification: true,
           plans: () =>
             runEffect(
-              Effect.map(stripe.getPlans(), (plans) =>
-                plans.map((plan) => ({
+              Effect.gen(function* () {
+                const stripe = yield* Stripe;
+                return (yield* stripe.getPlans()).map((plan) => ({
                   name: plan.name,
                   priceId: plan.monthlyPriceId,
                   annualDiscountPriceId: plan.annualPriceId,
@@ -194,12 +195,13 @@ const createBetterAuthOptions = ({
                       return Promise.resolve();
                     },
                   },
-                })),
-              ),
+                }));
+              }),
             ),
           authorizeReference: ({ user, referenceId, action }) =>
             runEffect(
               Effect.gen(function* () {
+                const d1 = yield* D1;
                 const result = Boolean(
                   yield* d1.first(
                     d1
@@ -277,9 +279,9 @@ type BetterAuthInstance = ReturnType<
 
 export class Auth extends ServiceMap.Service<Auth>()("Auth", {
   make: Effect.gen(function* () {
-    const d1 = yield* D1;
+    const services = yield* Effect.services<D1 | Stripe>();
+    const runEffect = Effect.runPromiseWith(services);
     const stripe = yield* Stripe;
-    const runEffect: CreateBetterAuthOptions["runEffect"] = Effect.runPromise;
     const authConfig = yield* Config.all({
       betterAuthUrl: Config.nonEmptyString("BETTER_AUTH_URL"),
       betterAuthSecret: Config.redacted("BETTER_AUTH_SECRET"),
@@ -291,8 +293,7 @@ export class Auth extends ServiceMap.Service<Auth>()("Auth", {
     const auth: BetterAuthInstance = betterAuth(
       createBetterAuthOptions({
         db,
-        d1,
-        stripe,
+        stripeClient: stripe.stripe,
         runEffect,
         kv: KV,
         betterAuthUrl: authConfig.betterAuthUrl,
@@ -303,6 +304,7 @@ export class Auth extends ServiceMap.Service<Auth>()("Auth", {
           runEffect(
             Effect.gen(function* () {
               if (user.role !== "user") return;
+              const d1 = yield* D1;
               const org = yield* Effect.tryPromise(() =>
                 auth.api.createOrganization({
                   body: {
@@ -324,6 +326,7 @@ export class Auth extends ServiceMap.Service<Auth>()("Auth", {
         databaseHookSessionCreateBefore: (session) =>
           runEffect(
             Effect.gen(function* () {
+              const d1 = yield* D1;
               const activeOrganization = yield* d1.first<{ id: string }>(
                 d1
                   .prepare(
